@@ -1,0 +1,4 @@
+[
+  "tests/test_article_workflows.py::test_article_draft_and_docx_fallback",
+  "tests/test_article_workflows.py::test_article_ideas_fallback_is_article_focused"
+]
