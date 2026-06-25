@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Article Topic Ideas | JournalReady AI</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20260625">
+  <link rel="stylesheet" href="/static/styles.css?v=20260625-resources">
 </head>
 <body>
   <header class="topbar">
@@ -15,10 +15,10 @@
     <section class="hero">
       <div class="hero-copy">
         <p class="eyebrow">Article idea development</p>
-        <h1>Extract focused journal article ideas from a thesis or study.</h1>
-        <p class="lead">Provide the thesis title, abstract, objectives, results, variables, themes, or dataset. The app will suggest article-level questions and contributions, not another thesis topic.</p>
+        <h1>Develop focused article ideas and identify feasible research resources.</h1>
+        <p class="lead">The app now pairs each article idea with possible official secondary datasets or candidate questionnaires, scales, interview guides and instrument sources. Every resource still requires a fit, access, permission and validity check.</p>
       </div>
-      <aside class="hero-note"><h2>What makes an article idea suitable?</h2><p>It has one central contribution, a clear article-level gap, evidence already available or realistically obtainable, and a defensible fit with a journal audience.</p></aside>
+      <aside class="hero-note"><h2>What makes an article idea suitable?</h2><p>It has one central contribution, a clear article-level gap, a feasible evidence route and a defensible fit with a journal audience.</p></aside>
     </section>
 
     <section class="grid-two">
@@ -26,7 +26,7 @@
         <h2>1. Study and publication inputs</h2>
         <label><span class="field-label">Research area *</span><input id="researchArea" required placeholder="e.g. procurement digitalisation and public expenditure"></label>
         <label><span class="field-label">Source of the proposed article</span><select id="sourceMode"><option>Extract from a completed thesis or dissertation</option><option>Extract from an ongoing thesis or dissertation</option><option>Develop from a completed research project</option><option>Develop from an existing dataset</option><option>Develop as a new independent article</option></select></label>
-        <label><span class="field-label">Thesis or study title</span><input id="thesisTitle" placeholder="Paste the original thesis, dissertation, or project title"></label>
+        <label><span class="field-label">Thesis or study title</span><input id="thesisTitle" placeholder="Paste the original thesis, dissertation, project or study title"></label>
         <label class="priority"><span class="field-label">Thesis material, abstract, objectives, findings, or study summary</span><textarea id="thesisMaterial" rows="9" placeholder="Paste the abstract, objectives, key results, chapter summaries, or enough material to identify distinct article contributions."></textarea><span class="help">Include actual results when available. The app won’t invent findings.</span></label>
         <div class="two-cols">
           <label><span class="field-label">Discipline</span><input id="discipline" placeholder="e.g. Finance, Education, Public Procurement"></label>
@@ -34,30 +34,42 @@
         </div>
         <div class="two-cols">
           <label><span class="field-label">Preferred article type</span><select id="articleType"><option>Empirical research article</option><option>Systematic review</option><option>Scoping review</option><option>Conceptual article</option><option>Methodological article</option><option>Case study article</option><option>Policy or practice article</option><option>Short communication</option></select></label>
-          <label><span class="field-label">Number of ideas</span><select id="maxIdeas"><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6" selected>6</option><option value="8">8</option><option value="10">10</option></select></label>
+          <label><span class="field-label">Likely research route</span><select id="researchRoute"><option>Auto</option><option>Secondary data or existing dataset</option><option>Primary survey or questionnaire</option><option>Qualitative interviews or focus groups</option><option>Mixed methods</option><option>Experimental research</option><option>Review or conceptual research</option></select></label>
         </div>
-        <label><span class="field-label">Methodology and analysis already used</span><textarea id="methodology" rows="3" placeholder="e.g. survey and PLS-SEM, panel regression, interviews and thematic analysis"></textarea></label>
+        <div class="two-cols">
+          <label><span class="field-label">Number of ideas</span><select id="maxIdeas"><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6" selected>6</option><option value="8">8</option><option value="10">10</option></select></label>
+          <label><span class="field-label">Resources to list</span><select id="resourceResultLimit"><option value="3">3</option><option value="5">5</option><option value="6" selected>6</option><option value="8">8</option><option value="10">10</option></select></label>
+        </div>
+        <label><span class="field-label">Methodology and analysis already used or proposed</span><textarea id="methodology" rows="3" placeholder="e.g. secondary panel regression, survey and PLS-SEM, interviews and thematic analysis"></textarea></label>
         <label><span class="field-label">Data and results available</span><textarea id="dataAvailable" rows="3" placeholder="Describe the dataset, sample, variables, tables, qualitative themes, models, or results available for publication."></textarea></label>
         <label><span class="field-label">Variables, constructs, relationships, or themes</span><textarea id="variablesThemes" rows="3" placeholder="One per line or comma-separated"></textarea></label>
         <label><span class="field-label">Preferred contribution</span><textarea id="preferredContribution" rows="3" placeholder="Theoretical extension, mechanism, boundary condition, context, method, policy, practice, or evidence synthesis"></textarea></label>
         <label><span class="field-label">Target journal</span><input id="targetJournal" placeholder="Optional journal name"></label>
         <label><span class="field-label">Journal aims and scope</span><textarea id="journalScope" rows="3" placeholder="Paste relevant aims, scope, or recent article themes"></textarea></label>
         <label><span class="field-label">Keywords or trend focus</span><input id="keywords" placeholder="Optional terms that should shape the ideas"></label>
-        <label class="check"><input type="checkbox" id="includeSourceSearch" checked> Search open scholarly metadata for current literature signals</label>
+        <label class="check"><input type="checkbox" id="includeSourceSearch" checked> Search open scholarly metadata for current literature and instrument-source signals</label>
+        <label class="check"><input type="checkbox" id="includeResourceSearch" checked> Search and list possible secondary datasets or questionnaire/instrument sources</label>
         <label class="check"><input type="checkbox" id="includeOlderFoundational" checked> Keep relevant foundational literature</label>
         <div class="actions"><button type="submit" id="generateBtn">Generate article ideas</button><button type="button" class="secondary" id="clearBtn">Clear</button></div>
         <p id="status" class="status"></p>
       </form>
 
       <section class="card">
-        <div class="result-head"><div><h2>2. Proposed article portfolio</h2><p class="help">Select only ideas with distinct questions, analyses, and contributions.</p></div><div class="output-actions"><button id="copyBtn" disabled>Copy all</button></div></div>
+        <div class="result-head"><div><h2>2. Proposed article portfolio</h2><p class="help">Each idea includes a research route and candidate data or instrument resources where applicable.</p></div><div class="output-actions"><button id="copyBtn" disabled>Copy all</button></div></div>
         <div id="portfolioNote" class="warning" hidden></div>
         <div id="ideas" class="idea-list"><p class="muted">Generated article ideas will appear here.</p></div>
       </section>
     </section>
 
-    <section class="card" style="margin-top:22px"><h2>3. Source records used</h2><p class="help">These records help identify current literature signals. Verify every source before citing it.</p><div id="sources" class="source-grid"></div></section>
+    <section class="card" style="margin-top:22px">
+      <h2>3. Research resource search</h2>
+      <p class="help">These are possible sources, not confirmed matches. Check variable coverage, population fit, time period, access terms, licensing, ethics and validation before use.</p>
+      <div id="resourceSummary" class="attached-summary">Research resource guidance will appear here.</div>
+      <div class="resource-columns"><div><h3>Possible secondary data sources</h3><div id="dataSources" class="resource-list"></div></div><div><h3>Possible questionnaire or instrument sources</h3><div id="instrumentSources" class="resource-list"></div></div></div>
+    </section>
+
+    <section class="card" style="margin-top:22px"><h2>4. Scholarly source records used</h2><p class="help">These records help identify current literature signals. Verify every source before citing it.</p><div id="sources" class="source-grid"></div></section>
   </main>
-  <script src="/static/topic_ideas.js?v=20260625"></script>
+  <script src="/static/topic_ideas.js?v=20260625-resources"></script>
 </body>
 </html>
