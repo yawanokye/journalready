@@ -1,45 +1,65 @@
 # JournalReady AI
 
-JournalReady AI is a standalone FastAPI application for developing journal article ideas and drafting manuscripts. It is intentionally separate from ProjectReady AI, which remains focused on theses, dissertations and project chapters.
+JournalReady AI is a standalone FastAPI application for article-topic development, staged manuscript writing, research-resource guidance and DOCX export. It remains separate from ProjectReady AI, which is focused on theses, dissertations and project chapters.
 
-## Main modules
+## Main workflows
 
 ### 1. Article Topic Ideas
 
-The `/topic-ideas` page develops publication-focused ideas from a thesis, dissertation, research project, dataset or new study. Each proposed idea includes:
+The `/topic-ideas` page develops publication-focused ideas from a thesis, dissertation, completed project, existing dataset or a new independent study. Each idea includes:
 
-- focused article title and angle
-- article-level literature gap
-- one overall article objective
-- tightly aligned research questions or hypotheses
-- contribution and journal fit
-- method and data route
-- evidence still required
-- readiness score
-- warning against compressing the entire thesis or duplicating claims
+- focused article title, angle and article-level gap
+- one overall objective with aligned questions or hypotheses
+- contribution, journal fit and method route
+- readiness score and evidence still needed
+- identified research route
+- possible official secondary datasets where secondary research is suitable
+- possible questionnaire, scale, interview-guide or instrument sources where primary or qualitative research is suitable
+- warnings on access, licensing, adaptation, validity and salami slicing
 
-The workflow is designed to distinguish legitimate separate papers from salami slicing. It does not treat a journal paper as a shortened thesis.
+Candidate resources are not automatic endorsements. Users must verify variable coverage, time and geographic coverage, population fit, access conditions, copyright or licence terms, ethics and validation requirements.
 
-### 2. Journal Article Writer
+### 2. Article Writer
 
-The `/article-writer` page accepts:
+The `/article-writer` page now supports three writing stages:
 
-- article title and type
-- source thesis or study material
-- article extraction focus
-- target journal and author guidelines
-- article-level problem, objective and contribution
-- methods, actual results and verified source notes
-- word limit and citation style
+1. **Full article from a completed study**
+2. **Stage 1: Develop a new article up to Methods**
+3. **Stage 2: Complete the article after results or analysis**
 
-It returns a Markdown manuscript draft and supports DOCX export. Missing evidence is shown in bracketed attention placeholders. Detected retracted or withdrawn source records are excluded where metadata exposes their status.
+When **Develop as a new independent article** is selected:
+
+- thesis, dissertation and project source fields are disabled
+- PhD is selected as the default research depth
+- the default workflow changes to Stage 1
+- the manuscript body is limited to Title through Methods
+- Results, Discussion and Conclusion are withheld until evidence is supplied
+- possible secondary data sources or instrument sources are listed
+- an optional provisional questionnaire, interview guide or measurement plan can be produced separately
+
+For Stage 2, users can upload or paste the earlier article sections and completed analysis. Supported uploads are DOCX, text-based PDF, XLSX, CSV, TXT, MD, RTF, LOG and JSON. The app extracts the text for review, then integrates the previous sections and confirmed results into a completed article.
+
+### 3. Scholarly source attachment
+
+Users can search OpenAlex, Crossref, Semantic Scholar and ERIC before drafting. Returned records are deduplicated, filtered for detected retractions or withdrawals, attached to the evidence bank and passed through a relevance gate. Attached sources enrich the user's evidence rather than replacing it.
+
+## API routes
+
+- `POST /api/article-ideas`
+- `POST /api/articles/research-resources`
+- `POST /api/articles/find-sources`
+- `POST /api/articles/extract-file`
+- `POST /api/articles/draft`
+- `POST /api/articles/export`
+- `GET /health`
 
 ## Local run
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -r requirements.txt
 cp .env.example .env
 uvicorn app.main:app --reload
 ```
@@ -52,33 +72,25 @@ Open:
 
 ## Render deployment
 
-- Build command: `pip install -r requirements.txt`
+Use:
+
+- Python version: `3.12.11`
+- Build command: `python -m pip install --upgrade pip setuptools wheel && python -m pip install -r requirements.txt`
 - Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
 - Health check path: `/health`
 
-Add `OPENAI_API_KEY` and the desired model variables from `.env.example` in Render.
+The additional upload dependencies are already listed in `requirements.txt`:
 
-## API routes
+- `python-multipart`
+- `pypdf`
+- `openpyxl`
 
-- `POST /api/article-ideas`
-- `POST /api/articles/draft`
-- `POST /api/articles/export`
-- `GET /health`
+After replacing the repository files, use **Clear build cache & deploy** on Render so the new dependencies are installed.
 
-## Separation from ProjectReady AI
+## Tests
 
-Deploy this folder as its own Render web service and domain or subdomain. Recommended examples are `journalreadyai.com`, `article.projectreadyai.com`, or another dedicated publication brand. The accompanying cleaned ProjectReady archive no longer loads the journal writer route.
+```bash
+PYTHONPATH=. pytest -q
+```
 
-## Render deployment fix for pydantic-core
-
-Render services created on or after 11 February 2026 default to Python 3.14.3. This project is pinned to Python 3.12.11 because the current dependency set includes Pydantic 2.11.5 and its compiled `pydantic-core` dependency.
-
-Use these Render settings:
-
-- Root Directory: leave blank when this folder is the repository root
-- Build Command: `python -m pip install --upgrade pip setuptools wheel && python -m pip install -r requirements.txt`
-- Start Command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- Health Check Path: `/health`
-- Environment Variable: `PYTHON_VERSION=3.12.11`
-
-After adding or changing `PYTHON_VERSION`, use **Clear build cache & deploy** so Render rebuilds the virtual environment with Python 3.12.11.
+The test suite covers article ideas, source-bank filtering, secondary-data guidance, independent-article Stage 1, instrument drafting, Stage 2 validation, file extraction and DOCX export.
