@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from app.source_finder import search_literature_sources
+from app.research_resources import discover_research_resources, infer_research_route, resources_for_idea
 
 _RETRACTION_TERMS = re.compile(
     r"\b(retracted|retraction\s+notice|withdrawn|removed\s+article|expression\s+of\s+concern)\b",
@@ -346,6 +347,7 @@ def _fallback_ideas(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 ],
                 "scope_warning": "Do not compress the entire thesis into one article. Build the paper around one central contribution and only the evidence needed to support it.",
                 "readiness_score": max(58, 88 - (index - 1) * 4),
+                "research_route": infer_research_route(payload, str(item.get("method_and_data_route") or "")),
             }
         )
         output.append(item)
@@ -381,6 +383,7 @@ def _normalise_ideas(parsed: dict[str, Any], payload: dict[str, Any]) -> list[di
                 "evidence_needed": _clean_list(raw.get("evidence_needed"), 8),
                 "scope_warning": str(raw.get("scope_warning") or "Build the article around one central contribution.").strip(),
                 "readiness_score": max(0, min(int(raw.get("readiness_score") or 70), 100)),
+                "research_route": str(raw.get("research_route") or infer_research_route(payload, str(raw.get("method_and_data_route") or ""))),
             }
         )
     return ideas
@@ -417,6 +420,8 @@ def generate_article_ideas(payload: dict[str, Any]) -> dict[str, Any]:
                 "Use only non-retracted source metadata supplied in source_records when discussing current literature signals.",
                 "Titles should be concise, searchable and article-like. Avoid thesis wording such as 'an assessment of' unless genuinely suitable.",
                 "Include a readiness score based on fit with the supplied thesis material, data, contribution and target journal.",
+                "Identify whether each idea is most suited to secondary data, a survey or scale, qualitative instruments, mixed methods, experimental instruments, or review/conceptual work.",
+                "For secondary-data ideas, the app will attach candidate official data sources. For primary or qualitative ideas, it will attach candidate questionnaire, scale, interview-guide or instrument sources that must be verified before adoption or adaptation.",
             ],
             "required_json_shape": {
                 "ideas": [
@@ -435,6 +440,7 @@ def generate_article_ideas(payload: dict[str, Any]) -> dict[str, Any]:
                         "evidence_needed": ["specific evidence or results needed"],
                         "scope_warning": "string",
                         "readiness_score": 0,
+                        "research_route": "secondary_data | survey_or_scale | qualitative_instrument | mixed_methods | experimental_instrument | review_or_conceptual | undetermined",
                     }
                 ],
                 "portfolio_note": "Briefly explain which ideas can coexist as separate articles without salami slicing or duplication.",
@@ -470,12 +476,37 @@ def generate_article_ideas(payload: dict[str, Any]) -> dict[str, Any]:
             "Avoid splitting one result into several minimally different papers, and disclose overlap with the thesis where required."
         )
 
+    resource_result: dict[str, Any] = {
+        "research_route": "undetermined",
+        "research_route_label": "Research route not yet determined",
+        "data_sources": [],
+        "instrument_sources": [],
+        "provider_errors": [],
+        "search_note": "Research-resource search was not requested.",
+    }
+    if payload.get("include_research_resource_search", True):
+        ideas_text = " ".join(
+            f"{idea.get('title', '')} {idea.get('objective', '')} {idea.get('method_and_data_route', '')}"
+            for idea in ideas
+        )
+        resource_result = discover_research_resources(
+            payload,
+            extra_text=ideas_text,
+            max_results=int(payload.get("resource_result_limit") or 6),
+            include_live_search=bool(payload.get("include_source_search", True)),
+        )
+        provider_errors.extend(resource_result.get("provider_errors") or [])
+
+    for idea in ideas:
+        idea["resource_guidance"] = resources_for_idea(idea, resource_result, limit=5)
+
     return {
         "ideas": ideas,
         "portfolio_note": portfolio_note,
         "model_used": model if client else "none",
         "mode": mode,
         "source_records_used": source_records,
+        "research_resources": resource_result,
         "provider_errors": provider_errors,
         "excluded_retracted_count": int(source_result.get("excluded_retracted_count") or 0),
         "quality_filters": source_result.get("quality_filters") or [
