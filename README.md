@@ -68,3 +68,17 @@ Add `OPENAI_API_KEY` and the desired model variables from `.env.example` in Rend
 ## Separation from ProjectReady AI
 
 Deploy this folder as its own Render web service and domain or subdomain. Recommended examples are `journalreadyai.com`, `article.projectreadyai.com`, or another dedicated publication brand. The accompanying cleaned ProjectReady archive no longer loads the journal writer route.
+
+## Render deployment fix for pydantic-core
+
+Render services created on or after 11 February 2026 default to Python 3.14.3. This project is pinned to Python 3.12.11 because the current dependency set includes Pydantic 2.11.5 and its compiled `pydantic-core` dependency.
+
+Use these Render settings:
+
+- Root Directory: leave blank when this folder is the repository root
+- Build Command: `python -m pip install --upgrade pip setuptools wheel && python -m pip install -r requirements.txt`
+- Start Command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- Health Check Path: `/health`
+- Environment Variable: `PYTHON_VERSION=3.12.11`
+
+After adding or changing `PYTHON_VERSION`, use **Clear build cache & deploy** so Render rebuilds the virtual environment with Python 3.12.11.
