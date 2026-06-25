@@ -1,1 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Article Writer | JournalReady AI</title>
+  <link rel="stylesheet" href="/static/styles.css?v=20260625">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><span class="brand-mark">JR</span><span>JournalReady AI</span></a>
+    <nav class="nav"><a href="/">Home</a><a href="/topic-ideas">Article Topic Ideas</a><a href="/article-writer" aria-current="page">Article Writer</a></nav>
+  </header>
+  <main class="shell">
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">Journal manuscript development</p>
+        <h1>Draft a focused article from verified study and journal inputs.</h1>
+        <p class="lead">Use an article idea, thesis material, results, and target journal requirements to build a manuscript around one central contribution. Missing evidence is shown as an attention placeholder rather than invented.</p>
+      </div>
+      <aside class="hero-note"><h2>Before drafting</h2><p>Choose the article contribution first. Then provide only the thesis sections, methods, findings, and sources needed for that paper. The writer should not reproduce the full dissertation structure.</p></aside>
+    </section>
 
+    <section class="grid-two">
+      <form id="articleForm" class="card form-card">
+        <h2>1. Article and evidence inputs</h2>
+        <label><span class="field-label">Working article title or topic *</span><input id="articleTitle" required placeholder="A focused article-level title"></label>
+        <label><span class="field-label">Research area</span><input id="researchArea" placeholder="Discipline and subject area"></label>
+        <label><span class="field-label">Source of the article</span><select id="sourceMode"><option>Extract from a completed thesis or dissertation</option><option>Extract from an ongoing thesis or dissertation</option><option>Develop from a completed research project</option><option>Develop from an existing dataset</option><option>Develop as a new independent article</option></select></label>
+        <label><span class="field-label">Source thesis or study title</span><input id="sourceThesisTitle" placeholder="Original thesis, dissertation, or project title"></label>
+        <label class="priority"><span class="field-label">Thesis or study source material</span><textarea id="thesisSourceMaterial" rows="9" placeholder="Paste the abstract, relevant literature, method, results, discussion, chapter extracts, or study summary needed for this article."></textarea><span class="help">Use only material that supports this article’s central argument. Maximum processed length is controlled by the server.</span></label>
+        <label><span class="field-label">Article extraction focus</span><textarea id="extractionFocus" rows="3" placeholder="State the one relationship, mechanism, theme, policy problem, methodological issue, or contribution this article should develop."></textarea></label>
+
+        <div class="two-cols">
+          <label><span class="field-label">Article type</span><select id="articleType"><option>Empirical research article</option><option>Systematic review</option><option>Scoping review</option><option>Conceptual article</option><option>Methodological article</option><option>Case study article</option><option>Policy or practice article</option><option>Short communication</option></select></label>
+          <label><span class="field-label">Research depth</span><select id="academicLevel"><option>Bachelors</option><option>Non-Research Masters</option><option selected>Research Masters (e.g. MPhil)</option><option>Professional Doctorate (DBA, DEd)</option><option>PhD</option></select></label>
+        </div>
+        <div class="two-cols">
+          <label><span class="field-label">Target word limit</span><input id="wordLimit" value="6000-8000"></label>
+          <label><span class="field-label">Citation style</span><select id="citationStyle"><option>APA 7th</option><option>Harvard</option><option>Chicago Author-Date</option><option>Vancouver</option><option>IEEE</option><option>AMA</option><option>Journal-specific style</option></select></label>
+        </div>
+        <label><span class="field-label">Target journal or publisher</span><input id="targetJournal" placeholder="Optional, but recommended"></label>
+        <label><span class="field-label">Journal aims, scope, and author guidelines</span><textarea id="authorGuidelines" rows="5" placeholder="Paste article structure, abstract format, word limit, tables/figures rules, reference requirements, and relevant scope notes."></textarea></label>
+        <label><span class="field-label">Study context</span><textarea id="context" rows="3" placeholder="Country, sector, population, institution, period, or case setting"></textarea></label>
+        <label><span class="field-label">Research problem and article-level gap</span><textarea id="researchProblem" rows="4" placeholder="Explain the unresolved issue this article addresses, not the whole thesis problem."></textarea></label>
+        <label><span class="field-label">Article objective, questions, or hypotheses</span><textarea id="objectives" rows="4" placeholder="Use one overall article objective, followed by tightly aligned questions or hypotheses where needed."></textarea></label>
+        <label><span class="field-label">Theory, framework, or literature anchor</span><textarea id="theoryFramework" rows="3" placeholder="State the theory and how it supports the article argument"></textarea></label>
+        <label><span class="field-label">Variables, constructs, relationships, or themes</span><textarea id="variablesConstructs" rows="3" placeholder="Include IV, DV, mediator, moderator, controls, or qualitative themes where applicable."></textarea></label>
+        <label><span class="field-label">Methodology and study design</span><textarea id="methodology" rows="4" placeholder="Design, population, sample, measures, data source, analysis, validity, ethics, and other relevant method details"></textarea></label>
+        <label class="priority"><span class="field-label">Data, analysis output, tables, or results</span><textarea id="dataResults" rows="8" placeholder="Paste actual coefficients, p-values, fit statistics, themes, quotations, robustness checks, tables, or a careful results summary."></textarea><span class="help">Results won’t be fabricated. Missing evidence appears in brackets.</span></label>
+        <label><span class="field-label">Key findings</span><textarea id="keyFindings" rows="4" placeholder="State only findings supported by the study evidence"></textarea></label>
+        <label><span class="field-label">Intended article contribution</span><textarea id="contribution" rows="4" placeholder="Explain the theoretical, empirical, methodological, contextual, policy, or practice contribution"></textarea></label>
+        <label><span class="field-label">Verified references, DOI links, and source notes</span><textarea id="referencesNotes" rows="5" placeholder="Paste verified sources or reference-bank notes. Do not include sources you have not checked."></textarea></label>
+        <label class="check"><input type="checkbox" id="includeSourceSearch" checked> Search open scholarly metadata before drafting</label>
+        <label class="check"><input type="checkbox" id="includeOlderFoundational" checked> Include relevant foundational literature</label>
+        <div class="actions"><button id="draftBtn" type="submit">Draft journal article</button><button id="clearBtn" type="button" class="secondary">Clear</button></div>
+        <p id="status" class="status"></p>
+      </form>
+
+      <section class="card">
+        <div class="result-head"><div><h2>2. Article draft</h2><p class="help">Review all claims, citations, results, declarations, and journal requirements before submission.</p></div><div class="output-actions"><button id="copyBtn" disabled>Copy</button><button id="downloadBtn" disabled>Download DOCX</button></div></div>
+        <textarea id="articleOutput" class="output-box" rows="32" placeholder="The journal article draft will appear here."></textarea>
+      </section>
+    </section>
+
+    <section class="card" style="margin-top:22px"><h2>3. Source records and filters</h2><p class="help">Detected retracted or withdrawn records are excluded where metadata exposes their status. Verify bibliographic details before citation.</p><div id="filters" class="idea-meta"></div><div id="sources" class="source-grid"></div></section>
+  </main>
+  <script src="/static/article_writer.js?v=20260625"></script>
+</body>
+</html>
