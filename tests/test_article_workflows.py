@@ -4,6 +4,7 @@ from app.article_service import draft_journal_article, export_article_docx
 
 def test_article_ideas_fallback_is_article_focused(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     result = generate_article_ideas(
         {
             "research_area": "digital procurement and public expenditure",
@@ -76,6 +77,7 @@ def test_attached_source_bank_is_used_and_retracted_record_is_excluded(monkeypat
 
 def test_article_ideas_list_secondary_data_sources(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     result = generate_article_ideas(
         {
             "research_area": "public procurement governance and expenditure",
@@ -140,3 +142,60 @@ def test_text_file_extraction():
     result = extract_uploaded_text("results.txt", b"Model 1 coefficient = 0.42\np-value = 0.01")
     assert result["filename"] == "results.txt"
     assert "0.42" in result["text"]
+
+
+def test_article_ideas_use_deepseek_v4_pro_only(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    import app.article_ideas_service as ideas_service
+
+    captured = {}
+    payload_json = {
+        "ideas": [
+            {
+                "title": "Digital procurement and expenditure outcomes",
+                "article_type": "Empirical research article",
+                "angle": "A focused empirical paper.",
+                "gap": "Recent evidence remains limited.",
+                "objective": "To examine digital procurement and expenditure outcomes.",
+                "questions_or_hypotheses": ["How are the variables related?"],
+                "contribution": "Provides focused evidence.",
+                "method_and_data_route": "Use secondary panel data.",
+                "journal_fit": "Assess against the selected journal.",
+                "suggested_sections": ["Introduction", "Methods", "Results", "Discussion"],
+                "keywords": ["digital procurement", "expenditure"],
+                "evidence_needed": ["Verified data"],
+                "scope_warning": "Keep one central contribution.",
+                "readiness_score": 82,
+                "research_route": "secondary_data",
+            }
+        ],
+        "portfolio_note": "One focused paper.",
+    }
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            message = SimpleNamespace(content=json.dumps(payload_json))
+            return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-deepseek-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.setattr(ideas_service, "_safe_get_deepseek_client", lambda: fake_client)
+
+    result = ideas_service.generate_article_ideas(
+        {
+            "research_area": "digital procurement",
+            "article_type": "Empirical research article",
+            "max_ideas": 3,
+            "include_source_search": False,
+            "include_research_resource_search": False,
+        }
+    )
+
+    assert captured["model"] == "deepseek-v4-pro"
+    assert captured["extra_body"]["thinking"]["type"] == "enabled"
+    assert captured["extra_body"]["reasoning_effort"] == "high"
+    assert result["model_used"] == "deepseek-v4-pro"
+    assert result["mode"] == "ai_generated"
