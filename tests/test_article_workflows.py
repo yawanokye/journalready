@@ -260,3 +260,63 @@ def test_source_query_deduplicates_repeated_topic_and_context():
         "term structure of interest rate in Ghana",
     )
     assert query.lower().count("term structure of interest rate in ghana") == 1
+
+
+def test_article_revision_fallback_preserves_article_and_reports_actions(monkeypatch):
+    from app.article_revision_service import revise_article
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    original = (
+        "# Digital procurement and expenditure\n\n"
+        "## Introduction\n\nDigital procurement may affect public expenditure outcomes. "
+        "The study examines this relationship using cross-country data.\n\n"
+        "## Methods\n\nThe study uses panel regression and governance controls.\n\n"
+        "## Results\n\nThe confirmed coefficient is -0.12 with p = 0.04."
+    )
+    result = revise_article(
+        {
+            "article_title": "Digital procurement and expenditure",
+            "article_text": original,
+            "review_comments": "Clarify the theoretical contribution.\nAdd robustness analysis.",
+            "include_source_search": False,
+        }
+    )
+    assert result["revised_article_text"] == original
+    assert "Revision and Publishability Report" in result["revision_report"]
+    assert "Clarify the theoretical contribution" in result["reviewer_response_matrix"]
+    assert result["mode"] == "metadata_fallback"
+
+
+def test_revision_docx_colours_changed_text_blue():
+    from docx import Document
+    from app.article_revision_service import export_revised_article_docx
+
+    original = "# Article Title\n\nThe model explains procurement outcomes."
+    revised = "# Article Title\n\nThe revised model more clearly explains public procurement outcomes."
+    stream, filename = export_revised_article_docx(
+        original_article_text=original,
+        revised_article_text=revised,
+        title="Article Title",
+        revision_report="# Report\n\nAdditional robustness analysis is recommended.",
+    )
+    assert filename.endswith("_polished_revision_blue.docx")
+    document = Document(stream)
+    colours = []
+    for paragraph in document.paragraphs:
+        for run in paragraph.runs:
+            if run.font.color.rgb is not None:
+                colours.append(str(run.font.color.rgb))
+    assert "0070C0" in colours
+
+
+def test_revision_package_parser_handles_report_and_matrix():
+    from app.article_revision_service import _split_revision_package
+
+    revised, report, matrix = _split_revision_package(
+        "===REVISED_ARTICLE===\n# Revised\nText\n"
+        "===REVISION_REPORT===\n# Report\nDetails\n"
+        "===REVIEWER_RESPONSE_MATRIX===\n| Comment | Action |\n|---|---|\n| A | B |"
+    )
+    assert revised.startswith("# Revised")
+    assert report.startswith("# Report")
+    assert "| A | B |" in matrix
