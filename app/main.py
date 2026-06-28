@@ -16,9 +16,9 @@ BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
 app = FastAPI(
-    title="JournalReady AI",
+    title="ArticleReady AI",
     description="Staged journal article ideation, research-resource guidance, instrument planning and manuscript drafting assistant.",
-    version="1.2.0",
+    version="1.3.1",
 )
 
 app.add_middleware(
@@ -55,4 +55,4 @@ def article_writer_alias() -> FileResponse:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "app": "JournalReady AI"}
+    return {"status": "ok", "app": "ArticleReady AI"}

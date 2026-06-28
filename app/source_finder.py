@@ -16,30 +16,59 @@ RETRACTION_PATTERN = re.compile(r"\b(retracted|retraction|withdrawn|withdrawal|e
 
 
 def build_source_query(profile: dict[str, Any], user_query: str = "") -> str:
-    """Create a focused literature-search query from the project profile and optional user terms."""
-    pieces: list[str] = []
+    """Create a focused, de-duplicated literature-search query.
+
+    Metadata APIs become noisy when the same title, research area, and country are
+    repeated several times. Keep the most specific phrases once and add context only
+    when it is not already present.
+    """
+    candidates: list[str] = []
     if user_query.strip():
-        pieces.append(user_query.strip())
+        candidates.append(user_query.strip())
 
     for key in ["title", "research_area"]:
         value = str(profile.get(key) or "").strip()
         if value:
-            pieces.append(value)
+            candidates.append(value)
 
     objectives = profile.get("objectives") or []
     if isinstance(objectives, str):
         objectives = [x.strip() for x in re.split(r"\n|;", objectives) if x.strip()]
-    pieces.extend(str(obj).strip() for obj in objectives[:3] if str(obj).strip())
+    candidates.extend(str(obj).strip() for obj in objectives[:2] if str(obj).strip())
 
     context = str(profile.get("study_context") or "").strip()
     if context:
-        # Add only the first sentence or first 160 characters to avoid weak, overlong searches.
-        first_sentence = re.split(r"(?<=[.!?])\s+", context)[0]
-        pieces.append(first_sentence[:160])
+        candidates.append(re.split(r"(?<=[.!?])\s+", context)[0][:100])
 
-    query = " ".join(pieces)
-    query = re.sub(r"\s+", " ", query).strip()
+    pieces: list[str] = []
+    seen: set[str] = set()
+    assembled = ""
+    for candidate in candidates:
+        clean = re.sub(r"\s+", " ", candidate).strip(" ,;.-")
+        key = re.sub(r"[^a-z0-9]+", " ", clean.lower()).strip()
+        if not clean or not key or key in seen:
+            continue
+        # Skip phrases already fully contained in a more specific phrase.
+        if assembled and key in assembled:
+            continue
+        seen.add(key)
+        pieces.append(clean)
+        assembled = " ".join(re.sub(r"[^a-z0-9]+", " ", x.lower()).strip() for x in pieces)
+
+    query = re.sub(r"\s+", " ", " ".join(pieces)).strip()
     return query[:MAX_QUERY_CHARS]
+
+
+def _should_search_eric(profile: dict[str, Any], query: str) -> bool:
+    text = " ".join(
+        str(profile.get(key) or "")
+        for key in ["research_area", "title", "discipline", "data_type", "notes"]
+    ).lower() + " " + query.lower()
+    education_terms = {
+        "education", "educational", "student", "teacher", "school", "university",
+        "college", "learning", "curriculum", "pedagogy", "literacy", "classroom",
+    }
+    return any(term in text for term in education_terms)
 
 
 def search_literature_sources(
@@ -65,8 +94,11 @@ def search_literature_sources(
         _search_openalex,
         _search_crossref,
         _search_semantic_scholar,
-        _search_eric,
     ]
+    # ERIC is education-specific. Searching it for finance, health, engineering, or
+    # other fields often returns records that merely share a country or a common word.
+    if _should_search_eric(profile, final_query):
+        providers.append(_search_eric)
 
     records: list[dict[str, Any]] = []
     provider_errors: list[dict[str, str]] = []
@@ -102,13 +134,9 @@ def search_literature_sources(
             older.append(src)
 
     if include_older_foundational:
-        selected = recent[: max_results]
-        remaining_slots = max_results - len(selected)
-        if remaining_slots > 0:
-            selected.extend(older[:remaining_slots])
-        remaining_slots = max_results - len(selected)
-        if remaining_slots > 0:
-            selected.extend(undated[:remaining_slots])
+        # Keep the relevance ranking intact so an older, exact foundational match
+        # is not displaced by a recent record that only shares a broad keyword.
+        selected = deduped[:max_results]
     else:
         selected = (recent + undated)[:max_results]
 
@@ -116,12 +144,12 @@ def search_literature_sources(
         "query": final_query,
         "searched_at": datetime.now(timezone.utc).isoformat(),
         "recent_reference_window": f"{recent_start_year}-{current_year}",
-        "databases": ["OpenAlex", "Crossref", "Semantic Scholar", "ERIC"],
+        "databases": [provider.__name__.replace("_search_", "").replace("_", " ").title() for provider in providers],
         "count": len(selected),
         "provider_errors": provider_errors,
         "excluded_retracted_count": len(excluded_retracted),
         "excluded_retracted_titles": [str(r.get("title") or "[untitled]")[:180] for r in excluded_retracted[:10]],
-        "quality_filters": ["retracted/withdrawn/expression-of-concern records excluded", "deduplicated by DOI/title", "ranked by relevance, recency, DOI, abstract and citation count"],
+        "quality_filters": ["retracted/withdrawn/expression-of-concern records excluded", "deduplicated by DOI/title", "ranked by topical relevance, recency, DOI, abstract and citation count"],
         "sources": selected,
         "usage_note": (
             "Use these retrieved records as preferred citation material, but verify bibliographic details, DOI links, retraction status, and institutional requirements before final submission. "
@@ -343,7 +371,7 @@ def _is_retracted_record(record: dict[str, Any]) -> bool:
 
 def _get_json(url: str) -> dict[str, Any]:
     request = Request(url, headers={
-        "User-Agent": "JournalReadyAI/1.0 (scholarly metadata search; mailto optional)",
+        "User-Agent": "ArticleReadyAI/1.0 (scholarly metadata search; mailto optional)",
         "Accept": "application/json",
     })
     with urlopen(request, timeout=DEFAULT_TIMEOUT_SECONDS) as response:  # nosec B310 - public metadata APIs only

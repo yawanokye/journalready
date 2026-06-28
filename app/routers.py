@@ -17,7 +17,7 @@ from app.schemas import (
     ResearchResourceRequest,
 )
 
-router = APIRouter(prefix="/api", tags=["JournalReady AI"])
+router = APIRouter(prefix="/api", tags=["ArticleReady AI"])
 
 
 @router.post("/article-ideas")

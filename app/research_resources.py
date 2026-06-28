@@ -14,6 +14,15 @@ _STOPWORDS = {
     "study", "research", "article", "effects", "effect", "relationship", "among", "using", "analysis",
 }
 
+# Location-only matches must never be enough to recommend a questionnaire or
+# scholarly instrument. They can help rank an already relevant resource, but they
+# do not establish conceptual fit.
+_WEAK_CONTEXT_TERMS = {
+    "ghana", "africa", "african", "country", "countries", "regional", "district",
+    "national", "international", "global", "context", "setting", "policy", "practice",
+    "finance", "financial", "market", "economy", "economic",
+}
+
 
 DATA_SOURCE_CATALOG: list[dict[str, Any]] = [
     {
@@ -320,6 +329,10 @@ def infer_research_route(payload: dict[str, Any], extra_text: str = "") -> str:
     if any(term in text for term in [
         "secondary data", "existing dataset", "archival", "administrative data", "panel data", "time series",
         "cross-country", "macro data", "financial database", "stock market data", "public records", "documentary data",
+        "term structure", "yield curve", "yield spread", "bond yield", "treasury bill", "treasury bond",
+        "interest rate", "exchange rate", "inflation", "monetary policy", "fiscal policy", "gdp",
+        "stock return", "commodity price", "market data", "banking data", "macroeconomic", "econometric",
+        "ardl", "var model", "vector autoregression", "garch", "cointegration", "fixed effects", "random effects",
     ]):
         return "secondary_data"
     if any(term in text for term in ["survey", "questionnaire", "likert", "scale", "pls-sem", "structural equation", "respondent"]):
@@ -341,21 +354,36 @@ def _rank_catalog(catalog: list[dict[str, Any]], query_text: str, limit: int) ->
     scored: list[tuple[float, dict[str, Any], list[str]]] = []
     for item in catalog:
         matched: list[str] = []
+        substantive_matches: list[str] = []
         score = 0.0
         for keyword in item.get("keywords") or []:
-            kw = str(keyword).lower()
-            if kw in query_lower:
-                score += 3.0 if " " in kw else 2.0
+            kw = str(keyword).lower().strip()
+            parts = [part for part in kw.split() if len(part) >= 3]
+            direct = bool(kw and kw in query_lower)
+            partial = bool(parts and all(part in tokens for part in parts))
+            if direct:
+                weight = 4.0 if " " in kw else 2.2
+                score += weight
                 matched.append(keyword)
-            elif any(part in tokens for part in kw.split() if len(part) >= 4):
-                score += 0.65
-        if "ghana" in query_lower and "ghana" in [str(k).lower() for k in item.get("keywords") or []]:
-            score += 4.0
-        if score > 0:
+            elif partial:
+                score += 1.2
+                matched.append(keyword)
+            elif any(part in tokens for part in parts if len(part) >= 4):
+                score += 0.45
+
+            if (direct or partial) and kw not in _WEAK_CONTEXT_TERMS and not all(part in _WEAK_CONTEXT_TERMS for part in parts):
+                substantive_matches.append(keyword)
+
+        # Country or region can improve ranking only after a substantive subject match.
+        if substantive_matches and "ghana" in query_lower and "ghana" in [str(k).lower() for k in item.get("keywords") or []]:
+            score += 2.0
+
+        # Conservative rule: a location-only or generic match is not a resource fit.
+        if substantive_matches and score >= 1.2:
             scored.append((score, item, matched))
-    if not scored:
-        # Broad, generally useful fallbacks. They remain labelled as possibilities, not confirmed matches.
-        scored = [(0.1, item, []) for item in catalog[: min(limit, 5)]]
+
+    # Do not fill empty results with unrelated generic catalogues. A short or empty
+    # list is more trustworthy than a plausible-looking but irrelevant list.
     scored.sort(key=lambda entry: entry[0], reverse=True)
     output: list[dict[str, Any]] = []
     for score, item, matched in scored[:limit]:
@@ -365,12 +393,12 @@ def _rank_catalog(catalog: list[dict[str, Any]], query_text: str, limit: int) ->
         if "coverage" in record:
             record["suitability"] = (
                 "Potentially suitable because it covers " + ", ".join(matched[:4]) + "."
-                if matched else "A broad data source that may be suitable after checking variable, unit, period and geographic coverage."
+                if matched else "Check variable, unit, period and geographic coverage before use."
             )
         else:
             record["suitability"] = (
                 "Potentially suitable for measuring " + ", ".join(matched[:4]) + "."
-                if matched else "A possible instrument source. Confirm construct fit, population fit, validity evidence and permission before use."
+                if matched else "Confirm construct fit, population fit, validity evidence and permission before use."
             )
         output.append(record)
     return output

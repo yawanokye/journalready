@@ -17,7 +17,7 @@ from app.research_resources import discover_research_resources, infer_research_r
 # Dynamic source context defaults are controlled through helpers below.  Keep this
 # reasonably high because journal articles need deeper citation coverage than a
 # thesis chapter subsection.
-MAX_SOURCE_CONTEXT = int(os.getenv("JOURNALREADY_ARTICLE_MAX_SOURCE_CONTEXT", "80"))
+MAX_SOURCE_CONTEXT = int(os.getenv("ARTICLEREADY_ARTICLE_MAX_SOURCE_CONTEXT", "80"))
 
 _RETRACTION_TERMS = re.compile(
     r"\b(retracted|retraction\s+notice|withdrawn|removed\s+article|expression\s+of\s+concern|erratum\s+to\s+retracted)\b",
@@ -116,7 +116,7 @@ def _article_reference_expectations(article_type: str) -> dict[str, Any]:
 
 
 def _article_source_limit(payload: dict[str, Any]) -> int:
-    env_limit = os.getenv("JOURNALREADY_ARTICLE_SOURCE_LIMIT", "").strip()
+    env_limit = os.getenv("ARTICLEREADY_ARTICLE_SOURCE_LIMIT", "").strip()
     if env_limit.isdigit():
         return max(1, int(env_limit))
     return int(_article_reference_expectations(str(payload.get("article_type") or "")).get("default_search_limit", 60))
@@ -281,7 +281,7 @@ def _search_sources(payload: dict[str, Any]) -> tuple[list[dict[str, Any]], list
 
 def _source_context(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
     records = []
-    max_context = max(1, int(os.getenv("JOURNALREADY_ARTICLE_MAX_SOURCE_CONTEXT", str(MAX_SOURCE_CONTEXT))))
+    max_context = max(1, int(os.getenv("ARTICLEREADY_ARTICLE_MAX_SOURCE_CONTEXT", str(MAX_SOURCE_CONTEXT))))
     for idx, src in enumerate(sources[:max_context], start=1):
         authors = src.get("authors") or []
         if isinstance(authors, str):
@@ -294,7 +294,7 @@ def _source_context(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "source": src.get("source", ""),
             "doi": src.get("doi", ""),
             "url": src.get("url", ""),
-            "abstract": str(src.get("abstract") or "")[: int(os.getenv("JOURNALREADY_ARTICLE_ABSTRACT_CHARS", "700"))],
+            "abstract": str(src.get("abstract") or "")[: int(os.getenv("ARTICLEREADY_ARTICLE_ABSTRACT_CHARS", "700"))],
             "database": src.get("database", ""),
             "relevance_tier": src.get("relevance_tier", ""),
             "citation_count": src.get("citation_count", ""),
@@ -804,7 +804,7 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
     provider_errors.extend(resources.get("provider_errors") or [])
     instrument_text = ""
 
-    if not client or os.getenv("JOURNALREADY_ARTICLE_USE_AI", "1").strip().lower() in {"0", "false", "no"}:
+    if not client or os.getenv("ARTICLEREADY_ARTICLE_USE_AI", "1").strip().lower() in {"0", "false", "no"}:
         article_text = _fallback_article(payload, sources, resources)
         instrument_text = _fallback_instrument(payload, resources)
         mode = "metadata_fallback"
@@ -866,7 +866,7 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
             response = client.responses.create(
                 model=model,
                 instructions=(
-                    "You are JournalReady AI's staged journal article development assistant. Respect the selected stage. "
+                    "You are ArticleReady AI's staged journal article development assistant. Respect the selected stage. "
                     "For a new independent study, stop the article body at Methods and provide data-source or instrument guidance without inventing access or validated items. "
                     "For Stage 2, use the uploaded previous sections and results to complete the manuscript."
                 ),
