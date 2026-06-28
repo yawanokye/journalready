@@ -1,6 +1,6 @@
-# JournalReady AI
+# ArticleReady AI
 
-JournalReady AI is a standalone FastAPI application for article-topic development, staged manuscript writing, research-resource guidance and DOCX export. It remains separate from ProjectReady AI, which is focused on theses, dissertations and project chapters.
+ArticleReady AI is a standalone FastAPI application for article-topic development, staged manuscript writing, research-resource guidance and DOCX export. It remains separate from ProjectReady AI, which is focused on theses, dissertations and project chapters.
 
 ## Main workflows
 
@@ -18,6 +18,10 @@ The `/topic-ideas` page develops publication-focused ideas from a thesis, disser
 - warnings on access, licensing, adaptation, validity and salami slicing
 
 Candidate resources are not automatic endorsements. Users must verify variable coverage, time and geographic coverage, population fit, access conditions, copyright or licence terms, ethics and validation requirements.
+
+For a **new independent article**, thesis and dissertation fields are hidden and removed from the backend payload. The topic-idea prompt and structured fallback use proposal language only. Macroeconomic, financial-market, interest-rate, yield-curve, bond and exchange-rate topics default to secondary or archival data unless the user explicitly selects another route.
+
+Scholarly records now pass a conservative topic-relevance gate before they are shown or sent to the idea model. Country-only matches, records sharing only one broad word, and discipline-mismatched ERIC results are excluded. The app prefers a short relevant list to a long noisy list.
 
 #### AI provider for article ideas
 
@@ -45,7 +49,7 @@ For Stage 2, users can upload or paste the earlier article sections and complete
 
 ### 3. Scholarly source attachment
 
-Users can search OpenAlex, Crossref, Semantic Scholar and ERIC before drafting. Returned records are deduplicated, filtered for detected retractions or withdrawals, attached to the evidence bank and passed through a relevance gate. Attached sources enrich the user's evidence rather than replacing it.
+Users can search OpenAlex, Crossref and Semantic Scholar before drafting. ERIC is searched only for education-related topics. Returned records are deduplicated, filtered for detected retractions or withdrawals, attached to the evidence bank and passed through a relevance gate. Attached sources enrich the user's evidence rather than replacing it.
 
 ## API routes
 
@@ -105,4 +109,4 @@ After replacing the repository files, use **Clear build cache & deploy** on Rend
 PYTHONPATH=. pytest -q
 ```
 
-The test suite covers article ideas, source-bank filtering, secondary-data guidance, independent-article Stage 1, instrument drafting, Stage 2 validation, file extraction and DOCX export.
+The test suite covers article ideas, strict topic-source filtering, duplicate-query control, secondary-data guidance, independent-article wording, independent-article Stage 1, instrument drafting, Stage 2 validation, file extraction and DOCX export.

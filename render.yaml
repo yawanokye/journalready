@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: journalready-ai
+    name: articleready-ai
     runtime: python
     region: oregon
     plan: starter
