@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Article Topic Ideas | JournalReady AI</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20260625-resources">
+  <title>Article Topic Ideas | ArticleReady AI</title>
+  <link rel="stylesheet" href="/static/styles.css?v=20260628-relevance-fix">
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="/"><span class="brand-mark">JR</span><span>JournalReady AI</span></a>
+    <a class="brand" href="/"><span class="brand-mark">AR</span><span>ArticleReady AI</span></a>
     <nav class="nav"><a href="/">Home</a><a href="/topic-ideas" aria-current="page">Article Topic Ideas</a><a href="/article-writer">Article Writer</a></nav>
   </header>
   <main class="shell">
@@ -23,11 +23,11 @@
 
     <section class="grid-two">
       <form id="ideaForm" class="card form-card">
-        <h2>1. Study and publication inputs</h2>
+        <h2>1. Research and publication inputs</h2>
         <label><span class="field-label">Research area *</span><input id="researchArea" required placeholder="e.g. procurement digitalisation and public expenditure"></label>
         <label><span class="field-label">Source of the proposed article</span><select id="sourceMode"><option>Extract from a completed thesis or dissertation</option><option>Extract from an ongoing thesis or dissertation</option><option>Develop from a completed research project</option><option>Develop from an existing dataset</option><option>Develop as a new independent article</option></select></label>
-        <label><span class="field-label">Thesis or study title</span><input id="thesisTitle" placeholder="Paste the original thesis, dissertation, project or study title"></label>
-        <label class="priority"><span class="field-label">Thesis material, abstract, objectives, findings, or study summary</span><textarea id="thesisMaterial" rows="9" placeholder="Paste the abstract, objectives, key results, chapter summaries, or enough material to identify distinct article contributions."></textarea><span class="help">Include actual results when available. The app won’t invent findings.</span></label>
+        <label id="thesisTitleField"><span class="field-label">Source study title</span><input id="thesisTitle" placeholder="Paste the original thesis, dissertation, project or dataset title"></label>
+        <label id="thesisMaterialField" class="priority"><span class="field-label">Source study material, objectives, findings, or summary</span><textarea id="thesisMaterial" rows="9" placeholder="Paste the abstract, objectives, key results, relevant sections, or enough material to identify distinct article contributions."></textarea><span class="help">This field is hidden for a new independent article. Include actual results only when they already exist.</span></label>
         <div class="two-cols">
           <label><span class="field-label">Discipline</span><input id="discipline" placeholder="e.g. Finance, Education, Public Procurement"></label>
           <label><span class="field-label">Study context</span><input id="context" placeholder="Country, sector, population, organisation, or period"></label>
@@ -52,6 +52,7 @@
         <label class="check"><input type="checkbox" id="includeOlderFoundational" checked> Keep relevant foundational literature</label>
         <div class="actions"><button type="submit" id="generateBtn">Generate article ideas</button><button type="button" class="secondary" id="clearBtn">Clear</button></div>
         <p id="status" class="status"></p>
+        <div id="warningDetails" class="warning-details" hidden></div>
       </form>
 
       <section class="card">
@@ -68,8 +69,8 @@
       <div class="resource-columns"><div><h3>Possible secondary data sources</h3><div id="dataSources" class="resource-list"></div></div><div><h3>Possible questionnaire or instrument sources</h3><div id="instrumentSources" class="resource-list"></div></div></div>
     </section>
 
-    <section class="card" style="margin-top:22px"><h2>4. Scholarly source records used</h2><p class="help">These records help identify current literature signals. Verify every source before citing it.</p><div id="sources" class="source-grid"></div></section>
+    <section class="card" style="margin-top:22px"><h2>4. Relevant scholarly source records retained</h2><p class="help">Only records that pass the topic-relevance filter are shown. A shorter list is preferable to unrelated records. Verify every retained source before citing it.</p><div id="sources" class="source-grid"></div></section>
   </main>
-  <script src="/static/topic_ideas.js?v=20260625-resources"></script>
+  <script src="/static/topic_ideas.js?v=20260628-relevance-fix"></script>
 </body>
 </html>

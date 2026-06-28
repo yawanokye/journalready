@@ -309,3 +309,25 @@ input:focus, select:focus, textarea:focus { outline: 3px solid rgba(30,94,255,.1
 @media (max-width: 900px) {
   .resource-columns { grid-template-columns: 1fr; }
 }
+
+/* Article-topic relevance and generation notes */
+.warning-details {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid #f2c68c;
+  border-radius: 12px;
+  background: #fff8ed;
+  color: #7a3d08;
+  font-size: .9rem;
+}
+.warning-details ul { margin: 8px 0 0 20px; padding: 0; }
+.warning-details li { margin: 4px 0; }
+.source-match {
+  margin: 8px 0;
+  padding: 7px 9px;
+  border-radius: 9px;
+  background: #f0fdf4;
+  color: #166534;
+  font-size: .78rem;
+}
+[hidden] { display: none !important; }

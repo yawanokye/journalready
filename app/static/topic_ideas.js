@@ -3,6 +3,26 @@ let lastResult = null;
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[ch]));
 const val = (id) => ($(id)?.value || "").trim();
 
+function isIndependent() {
+  return val("sourceMode").toLowerCase().includes("new independent article");
+}
+
+function syncSourceMode() {
+  const independent = isIndependent();
+  const titleField = $("thesisTitleField");
+  const materialField = $("thesisMaterialField");
+  if (titleField) titleField.hidden = independent;
+  if (materialField) materialField.hidden = independent;
+  if ($("thesisTitle")) {
+    $("thesisTitle").disabled = independent;
+    if (independent) $("thesisTitle").value = "";
+  }
+  if ($("thesisMaterial")) {
+    $("thesisMaterial").disabled = independent;
+    if (independent) $("thesisMaterial").value = "";
+  }
+}
+
 function safeUrl(value) {
   try {
     const url = new URL(String(value || ""), window.location.origin);
@@ -14,8 +34,8 @@ function payload() {
   return {
     research_area: val("researchArea"),
     source_mode: val("sourceMode"),
-    thesis_title: val("thesisTitle"),
-    thesis_material: val("thesisMaterial"),
+    thesis_title: isIndependent() ? "" : val("thesisTitle"),
+    thesis_material: isIndependent() ? "" : val("thesisMaterial"),
     discipline: val("discipline"),
     context: val("context"),
     target_journal: val("targetJournal"),
@@ -103,8 +123,30 @@ function renderResources(result) {
 
 function renderSources(result) {
   const sources = result.source_records_used || [];
-  $("sources").innerHTML = sources.length ? sources.map(src => `<article class="source"><strong>${esc(src.key)}: ${esc(src.title || "Untitled")}</strong><div class="muted">${esc(Array.isArray(src.authors) ? src.authors.join(", ") : src.authors || "")} ${src.year ? `(${esc(src.year)})` : ""}</div><div class="muted">${esc(src.source || src.database || "")}</div>${safeUrl(src.url) ? `<a href="${esc(safeUrl(src.url))}" target="_blank" rel="noopener">Open record</a>` : ""}</article>`).join("") : `<p class="muted">No scholarly source records were available. The ideas may still be generated from the supplied study material and resource catalogues.</p>`;
+  $("sources").innerHTML = sources.length ? sources.map(src => {
+    const matched = Array.isArray(src.matched_topic_terms) ? src.matched_topic_terms.filter(Boolean) : [];
+    return `<article class="source"><strong>${esc(src.key)}: ${esc(src.title || "Untitled")}</strong><div class="muted">${esc(Array.isArray(src.authors) ? src.authors.join(", ") : src.authors || "")} ${src.year ? `(${esc(src.year)})` : ""}</div><div class="muted">${esc(src.source || src.database || "")}</div>${matched.length ? `<div class="source-match"><strong>Matched topic signals:</strong> ${esc(matched.join(", "))}</div>` : ""}${safeUrl(src.url) ? `<a href="${esc(safeUrl(src.url))}" target="_blank" rel="noopener">Open record</a>` : ""}</article>`;
+  }).join("") : `<p class="muted">No scholarly records passed the topic-relevance filter. Refine the research area or add specific variables and keywords rather than using unrelated records.</p>`;
 }
+
+function renderWarnings(result) {
+  const warnings = result.provider_errors || [];
+  const box = $("warningDetails");
+  if (!box) return;
+  if (!warnings.length) {
+    box.hidden = true;
+    box.innerHTML = "";
+    return;
+  }
+  const items = warnings.map(item => {
+    if (typeof item === "string") return item;
+    const provider = item?.provider ? `${item.provider}: ` : "";
+    return `${provider}${item?.error || "A source service returned a warning."}`;
+  });
+  box.hidden = false;
+  box.innerHTML = `<strong>Generation notes</strong><ul>${items.map(item => `<li>${esc(item)}</li>`).join("")}</ul>`;
+}
+
 
 async function generate(event) {
   event.preventDefault();
@@ -119,8 +161,16 @@ async function generate(event) {
     renderIdeas(body);
     renderResources(body);
     renderSources(body);
+    renderWarnings(body);
     const warnings = (body.provider_errors || []).length;
-    $("status").textContent = warnings ? `Ideas generated with ${warnings} source, resource, or model warning(s). Review the evidence and access requirements.` : `Ideas and research-resource guidance generated using ${body.model_used || "the configured workflow"}.`;
+    const excluded = Number(body.excluded_irrelevant_count || 0);
+    if (body.mode === "structured_fallback") {
+      $("status").textContent = `Provisional ideas generated with the structured fallback. ${excluded ? `${excluded} weak or unrelated scholarly record(s) were excluded. ` : ""}Review the generation notes before using the ideas.`;
+    } else if (warnings) {
+      $("status").textContent = `Ideas generated with ${warnings} source or resource warning(s). ${excluded ? `${excluded} weak or unrelated record(s) were excluded.` : ""}`;
+    } else {
+      $("status").textContent = `Ideas generated using ${body.model_used || "the configured workflow"}. ${excluded ? `${excluded} weak or unrelated scholarly record(s) were excluded.` : ""}`;
+    }
   } catch (error) { $("status").textContent = `Error: ${error.message}`; }
   finally { $("generateBtn").disabled = false; }
 }
@@ -149,12 +199,16 @@ function clearAll() {
   $("resourceSummary").textContent = "Research resource guidance will appear here.";
   $("portfolioNote").hidden = true;
   $("status").textContent = "";
+  if ($("warningDetails")) { $("warningDetails").hidden = true; $("warningDetails").innerHTML = ""; }
   $("copyBtn").disabled = true;
   lastResult = null;
+  syncSourceMode();
 }
 
 window.addEventListener("DOMContentLoaded", () => {
   $("ideaForm").addEventListener("submit", generate);
   $("copyBtn").addEventListener("click", copyAll);
   $("clearBtn").addEventListener("click", clearAll);
+  $("sourceMode").addEventListener("change", syncSourceMode);
+  syncSourceMode();
 });
