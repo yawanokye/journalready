@@ -320,3 +320,64 @@ def test_revision_package_parser_handles_report_and_matrix():
     assert revised.startswith("# Revised")
     assert report.startswith("# Report")
     assert "| A | B |" in matrix
+
+
+def test_revision_docx_renders_bold_italic_and_red_actions():
+    from docx import Document
+    from app.article_revision_service import export_revised_article_docx
+
+    original = "# Article Title\n\nThe model explains procurement outcomes."
+    revised = (
+        "# Article Title\n\n"
+        "The **revised model** offers *careful interpretation* of procurement outcomes. "
+        "[confirm robustness test before submission]"
+    )
+    stream, _ = export_revised_article_docx(
+        original_article_text=original,
+        revised_article_text=revised,
+        title="Article Title",
+    )
+    document = Document(stream)
+    all_text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    assert "**" not in all_text
+    assert "*careful interpretation*" not in all_text
+
+    runs = [run for paragraph in document.paragraphs for run in paragraph.runs]
+    assert any(run.bold and run.text == "revised" for run in runs)
+    assert any(run.bold and run.text == "model" for run in runs)
+    assert any(run.italic and run.text == "careful" for run in runs)
+    assert any(run.italic and run.text == "interpretation" for run in runs)
+    red_action_text = "".join(
+        run.text for run in runs
+        if run.font.color.rgb is not None and str(run.font.color.rgb) == "C00000"
+    )
+    assert "confirm robustness test" in red_action_text
+    assert any(
+        "revised" in run.text
+        and run.font.color.rgb is not None
+        and str(run.font.color.rgb) == "0070C0"
+        for run in runs
+    )
+
+
+def test_article_docx_renders_markdown_and_red_actions():
+    from docx import Document
+    from app.article_service import export_article_docx
+
+    stream, _ = export_article_docx(
+        "# **Article Title**\n\nThis is *important*. [insert verified source]",
+        title="Article Title",
+    )
+    document = Document(stream)
+    all_text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    assert "**" not in all_text
+    assert "*important*" not in all_text
+    runs = [run for paragraph in document.paragraphs for run in paragraph.runs]
+    assert any(run.bold and "Article Title" in run.text for run in runs)
+    assert any(run.italic and "important" in run.text for run in runs)
+    assert any(
+        "insert verified source" in run.text
+        and run.font.color.rgb is not None
+        and str(run.font.color.rgb) == "C00000"
+        for run in runs
+    )
