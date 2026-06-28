@@ -20,6 +20,8 @@ services:
         value: high
       - key: OPENAI_API_KEY
         sync: false
+      - key: OPENAI_ARTICLE_REVISION_MODEL
+        value: gpt-5.5
       - key: OPENALEX_MAILTO
         value: aadam@ucc.edu.gh
       - key: CROSSREF_MAILTO
