@@ -1,8 +1,8 @@
 const $ = (id) => document.getElementById(id);
 const val = (id) => ($(id)?.value || "").trim();
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[ch]));
-const SOURCE_STORAGE_KEY = "journalready_attached_source_bank_v1";
-const SEARCH_STORAGE_KEY = "journalready_latest_source_search_v1";
+const SOURCE_STORAGE_KEY = "articleready_attached_source_bank_v1";
+const SEARCH_STORAGE_KEY = "articleready_latest_source_search_v1";
 
 let lastText = "";
 let lastInstrumentText = "";
