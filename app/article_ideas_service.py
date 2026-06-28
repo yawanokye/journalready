@@ -15,27 +15,23 @@ _RETRACTION_TERMS = re.compile(
 )
 
 
-def _safe_get_openai_client():
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+def _safe_get_deepseek_client():
+    """Return a DeepSeek client used only by the article-topic idea workflow."""
+    api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
     if not api_key:
         return None
     try:
         from openai import OpenAI
 
-        return OpenAI(api_key=api_key)
+        base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").strip()
+        return OpenAI(api_key=api_key, base_url=base_url)
     except Exception:
         return None
 
 
-def _select_model(article_type: str) -> str:
-    article_type_l = (article_type or "").lower()
-    advanced = any(
-        token in article_type_l
-        for token in ["systematic", "scoping", "conceptual", "methodological", "meta-analysis", "meta analysis"]
-    )
-    if advanced:
-        return os.getenv("OPENAI_ARTICLE_IDEA_ADVANCED_MODEL", "gpt-5.5").strip()
-    return os.getenv("OPENAI_ARTICLE_IDEA_MODEL", "gpt-5.4").strip()
+def _select_model(article_type: str = "") -> str:
+    # Article-topic ideas always use DeepSeek V4 Pro. The article writer remains on OpenAI.
+    return os.getenv("DEEPSEEK_ARTICLE_IDEA_MODEL", "deepseek-v4-pro").strip() or "deepseek-v4-pro"
 
 
 def _looks_retracted(source: dict[str, Any]) -> bool:
@@ -154,6 +150,14 @@ def _extract_json(text: str) -> dict[str, Any] | None:
 
 
 def _response_text(response: Any) -> str:
+    """Extract final answer text from DeepSeek ChatCompletions or OpenAI-style responses."""
+    choices = getattr(response, "choices", None) or []
+    if choices:
+        message = getattr(choices[0], "message", None)
+        content = getattr(message, "content", None) if message is not None else None
+        if content:
+            return str(content)
+
     text = getattr(response, "output_text", None)
     if text:
         return str(text)
@@ -396,7 +400,7 @@ def generate_article_ideas(payload: dict[str, Any]) -> dict[str, Any]:
     sources, source_result = _search_sources(payload)
     source_records = _source_context(sources)
     model = _select_model(str(payload.get("article_type") or ""))
-    client = _safe_get_openai_client()
+    client = _safe_get_deepseek_client()
     provider_errors: list[Any] = list(source_result.get("provider_errors") or [])
     ideas: list[dict[str, Any]] = []
     mode = "structured_fallback"
@@ -448,13 +452,36 @@ def generate_article_ideas(payload: dict[str, Any]) -> dict[str, Any]:
             "output_rule": "Return valid JSON only, with no markdown fences.",
         }
         try:
-            response = client.responses.create(
+            thinking_enabled = os.getenv("DEEPSEEK_ARTICLE_IDEA_THINKING", "1").strip().lower() not in {
+                "0", "false", "no", "off"
+            }
+            reasoning_effort = os.getenv("DEEPSEEK_ARTICLE_IDEA_REASONING_EFFORT", "high").strip().lower()
+            if reasoning_effort not in {"high", "max"}:
+                reasoning_effort = "high"
+            max_tokens = max(2000, min(int(os.getenv("DEEPSEEK_ARTICLE_IDEA_MAX_TOKENS", "12000")), 50000))
+
+            response = client.chat.completions.create(
                 model=model,
-                instructions=(
-                    "You are JournalReady AI's article development editor. Convert broad studies and theses into ethical, focused, publication-oriented article ideas. "
-                    "Protect against salami slicing, duplicated claims, invented novelty and unsupported methods. Return valid JSON only."
-                ),
-                input=json.dumps(prompt, ensure_ascii=False, indent=2),
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are JournalReady AI's article development editor. Convert broad studies and theses into ethical, focused, publication-oriented article ideas. "
+                            "Protect against salami slicing, duplicated claims, invented novelty and unsupported methods. Return valid JSON only."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(prompt, ensure_ascii=False, indent=2),
+                    },
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=max_tokens,
+                stream=False,
+                extra_body={
+                    "thinking": {"type": "enabled" if thinking_enabled else "disabled"},
+                    "reasoning_effort": reasoning_effort,
+                },
             )
             parsed = _extract_json(_response_text(response))
             ideas = _normalise_ideas(parsed or {}, payload)
@@ -464,10 +491,14 @@ def generate_article_ideas(payload: dict[str, Any]) -> dict[str, Any]:
             else:
                 portfolio_note = ""
         except Exception as exc:
-            provider_errors.append(f"OpenAI article idea generation failed: {str(exc)[:180]}")
+            provider_errors.append(f"DeepSeek article idea generation failed: {str(exc)[:180]}")
             portfolio_note = ""
     else:
         portfolio_note = ""
+        if os.getenv("JOURNALREADY_IDEA_USE_AI", "1").strip().lower() not in {"0", "false", "no"} and not client:
+            provider_errors.append(
+                "DEEPSEEK_API_KEY is not configured. Article ideas were generated with the structured fallback."
+            )
 
     if not ideas:
         ideas = _fallback_ideas(payload)
