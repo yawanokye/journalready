@@ -7,11 +7,14 @@ from fastapi.responses import StreamingResponse
 
 from app.article_ideas_service import generate_article_ideas
 from app.article_service import draft_journal_article, export_article_docx, find_article_sources
+from app.article_revision_service import export_revised_article_docx, revise_article
 from app.file_extractor import extract_uploaded_text
 from app.research_resources import discover_research_resources
 from app.schemas import (
     ArticleExportRequest,
     ArticleIdeaRequest,
+    ArticleRevisionExportRequest,
+    ArticleRevisionRequest,
     ArticleSourceSearchRequest,
     JournalArticleRequest,
     ResearchResourceRequest,
@@ -88,3 +91,33 @@ def export_journal_article(payload: ArticleExportRequest) -> StreamingResponse:
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Article export failed: {str(exc)[:240]}") from exc
+
+
+@router.post("/articles/revise")
+def revise_existing_article(payload: ArticleRevisionRequest) -> dict[str, Any]:
+    try:
+        return revise_article(payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Article revision failed: {str(exc)[:240]}") from exc
+
+
+@router.post("/articles/revision/export")
+def export_revised_article(payload: ArticleRevisionExportRequest) -> StreamingResponse:
+    try:
+        stream, filename = export_revised_article_docx(
+            original_article_text=payload.original_article_text,
+            revised_article_text=payload.revised_article_text,
+            title=payload.article_title,
+            revision_report=payload.revision_report,
+            reviewer_response_matrix=payload.reviewer_response_matrix,
+            include_revision_report=payload.include_revision_report,
+        )
+        return StreamingResponse(
+            stream,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Revision export failed: {str(exc)[:240]}") from exc

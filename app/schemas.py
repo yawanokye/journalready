@@ -150,3 +150,58 @@ class JournalArticleRequest(BaseModel):
 class ArticleExportRequest(BaseModel):
     article_title: str = "Journal Article Draft"
     article_text: str = Field(..., min_length=10)
+
+
+class ArticleRevisionRequest(BaseModel):
+    article_title: str = Field(..., min_length=3)
+    article_text: str = Field(..., min_length=100)
+    review_comments: str = ""
+    target_journal: str = ""
+    journal_scope: str = ""
+    author_guidelines: str = ""
+    article_type: str = "Empirical research article"
+    citation_style: str = "APA 7th"
+    word_limit: str = ""
+    research_area: str = ""
+    context: str = ""
+    methodology: str = ""
+    data_and_results: str = ""
+    contribution_claim: str = ""
+    revision_level: str = "Publication-readiness overhaul"
+    revision_goals: str = ""
+    academic_level: str = "PhD"
+    strengthen_conceptualisation: bool = True
+    strengthen_contribution: bool = True
+    assess_method_fit: bool = True
+    assess_analysis: bool = True
+    deepen_discussion: bool = True
+    strengthen_recommendations: bool = True
+    include_reviewer_response_matrix: bool = True
+    include_source_search: bool = True
+    include_older_foundational: bool = True
+    source_search_terms: str = ""
+    source_bank: list[dict[str, Any]] = Field(default_factory=list)
+
+    @field_validator("source_bank")
+    @classmethod
+    def validate_revision_source_bank(cls, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [item for item in value if isinstance(item, dict)][:120]
+
+    @field_validator("revision_level")
+    @classmethod
+    def validate_revision_level(cls, value: str) -> str:
+        allowed = {
+            "Language and clarity polish",
+            "Substantive scholarly revision",
+            "Publication-readiness overhaul",
+        }
+        return value if value in allowed else "Publication-readiness overhaul"
+
+
+class ArticleRevisionExportRequest(BaseModel):
+    article_title: str = "Revised Journal Article"
+    original_article_text: str = Field(..., min_length=10)
+    revised_article_text: str = Field(..., min_length=10)
+    revision_report: str = ""
+    reviewer_response_matrix: str = ""
+    include_revision_report: bool = True
