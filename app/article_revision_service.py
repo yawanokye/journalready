@@ -9,14 +9,22 @@ from datetime import datetime
 from typing import Any
 
 from app.article_service import (
+    _apply_strong_article_humanisation,
+    _article_prompt_quality_pack,
     _article_reference_expectations,
     _finalise_article_text,
+    _humanisation_strength,
+    _parse_inline_segments,
+    _plain_inline_text,
     _safe_get_openai_client,
+    _strong_humanisation_enabled,
+    _strong_humanisation_requirements,
     _search_sources,
     _source_context,
 )
 
 _REVISION_BLUE = (0, 112, 192)
+_ACTION_RED = (192, 0, 0)
 
 
 def _revision_model() -> str:
@@ -67,6 +75,39 @@ def _revision_focus(payload: dict[str, Any]) -> list[str]:
         ("strengthen_recommendations", "evidence-linked implications and feasible recommendations for named actors"),
     ]
     return [description for key, description in focus_map if bool(payload.get(key, True))]
+
+
+def _revision_human_writing_layer(payload: dict[str, Any]) -> dict[str, Any]:
+    """Extend the article writer's human-supervised academic style controls for revision work.
+
+    The shared quality pack keeps article drafting and article revision aligned.
+    These additional rules are revision-specific and preserve the author's evidence,
+    citations and substantive voice while improving scholarly flow.
+    """
+    base_pack = _article_prompt_quality_pack(payload)
+    return {
+        "base_article_quality_pack": base_pack,
+        "strong_humanisation_requirements": _strong_humanisation_requirements(payload),
+        "revision_specific_rules": [
+            "Preserve the author's substantive position and disciplinary voice. Refine expression and argument without replacing the study with a generic manuscript.",
+            "Use controlled high burstiness and strong lexical variation according to the complexity of the argument. Do not force every paragraph into the same rhythm or size.",
+            "Combine concise emphasis with developed analytical sentences, but do not create fragments or artificial irregularities.",
+            "Build substantive paragraphs around claim, evidence, interpretation, limitation and contribution where appropriate, rather than using repetitive topic-sentence templates.",
+            "Vary paragraph openings and transitions. Avoid repeated constructions such as 'This study', 'The findings show', 'Furthermore' and 'Moreover' when a more direct transition is available.",
+            "Prefer precise, grounded verbs such as indicates, qualifies, complicates, supports, constrains, extends, contradicts, explains and suggests.",
+            "Remove generic filler, inflated novelty claims, mechanical summaries and author-by-author literature listing.",
+            "Keep conceptual definitions, mechanisms, boundary conditions and contribution claims specific to the supplied study and evidence.",
+            "Preserve valid in-text citations exactly where possible. Do not invent citations, alter author names or years, or detach a citation from the claim it supports.",
+            "Do not introduce artificial mistakes, awkward grammar, random informality or deliberate imperfections.",
+            "Do not add commentary about AI detection, humanisation, detector scores or making the article appear human. Produce normal scholarly prose only.",
+            "Use formal British English, minimise long dashes and keep headings, tables, equations and citations clean.",
+        ],
+        "post_processing": (
+            "After the model revision, the shared deterministic strong humanisation pass from article_service.py "
+            "varies sentence rhythm, paragraph openings and repetitive wording while protecting evidence, citations, "
+            "tables, equations, placeholders, references and document structure."
+        ),
+    }
 
 
 def _fallback_revision_report(payload: dict[str, Any], source_records: list[dict[str, Any]], provider_errors: list[str]) -> str:
@@ -177,6 +218,7 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
             "current_year": current_year,
             "article_inputs": article_inputs,
             "revision_focus": _revision_focus(payload),
+            "human_like_writing_layer": _revision_human_writing_layer(payload),
             "scholarly_source_records": source_records,
             "reference_depth_guidance": _article_reference_expectations(str(payload.get("article_type") or "")),
             "strict_revision_rules": [
@@ -194,7 +236,12 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
                 "Apply a strict relevance gate to scholarly records. Use only records that directly support the article. Never invent bibliographic details or cite a metadata record as evidence for a finding not visible in its title or abstract.",
                 "Retain existing valid citations. Do not remove a citation merely because its full record was not supplied, but flag obviously incomplete or unverifiable references in the report.",
                 "Address every reviewer comment where possible. When a comment cannot be resolved from supplied evidence, state the precise action or analysis needed rather than pretending it was completed.",
-                "Write in polished formal British English with natural academic rhythm. Avoid template-like filler, inflated claims, repetitive transitions and mechanical author-by-author summaries.",
+                "Apply the human_like_writing_layer and its strong_humanisation_requirements throughout the revised manuscript, including prose, objectives, methods, equations, frameworks and references where relevant.",
+                "Use controlled high burstiness, strong but meaning-preserving lexical variation, varied paragraph openings and natural transitions.",
+                "Write in polished formal British English with natural academic rhythm. Vary sentence and paragraph length according to the argument rather than using a uniform template.",
+                "Build substantive paragraphs around claim, evidence, interpretation, qualification and contribution where appropriate. Avoid mechanical author-by-author summaries.",
+                "Preserve the author's disciplinary voice and valid citations while removing template-like filler, inflated claims, repetitive transitions and generic wording.",
+                "Do not add artificial errors or any commentary about AI detection, humanisation or detector evasion.",
             ],
             "revision_report_requirements": [
                 "Begin with an overall publication-readiness assessment that does not guarantee acceptance.",
@@ -221,8 +268,12 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
             response = client.responses.create(
                 model=model,
                 instructions=(
-                    "You are ArticleReady AI's senior journal article revision editor. Revise rigorously but preserve the study's confirmed evidence. "
-                    "Never invent analysis or results. Clearly separate manuscript revision from recommendations for further analysis."
+                    "You are ArticleReady AI's senior journal article revision editor. Revise rigorously but preserve the study's confirmed evidence, "
+                    "valid citations and substantive authorial voice. Apply the supplied strong human-supervised academic writing layer to produce natural, "
+                    "publication-focused scholarly prose with controlled high burstiness, varied paragraph openings, precise lexical choices, "
+                    "careful transitions and paragraph-level reasoning. "
+                    "Never invent analysis or results. Do not add artificial errors or mention AI detection or humanisation. "
+                    "Clearly separate manuscript revision from recommendations for further analysis."
                 ),
                 input=json.dumps(prompt, ensure_ascii=False, indent=2),
             )
@@ -243,6 +294,17 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
             mode = "metadata_fallback_after_ai_error"
 
     revised_article = _finalise_article_text(revised_article)
+    if mode == "ai_revision":
+        revised_article = _apply_strong_article_humanisation(
+            revised_article,
+            seed_text="|".join([
+                str(payload.get("article_title") or ""),
+                str(payload.get("article_type") or ""),
+                str(payload.get("target_journal") or ""),
+                "revision",
+            ]),
+        )
+        revised_article = _finalise_article_text(revised_article)
     revision_report = _finalise_article_text(revision_report)
     reviewer_matrix = _finalise_article_text(reviewer_matrix) if reviewer_matrix else ""
 
@@ -257,8 +319,12 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
         "excluded_retracted_count": len(blocked),
         "excluded_retracted_titles": [str(item.get("title") or "Untitled") for item in blocked[:10]],
         "provider_errors": provider_errors,
-        "revision_colour_note": "In the downloaded DOCX, wording added or changed by ArticleReady AI is shown in blue. Exact unchanged wording remains black.",
+        "revision_colour_note": "In the downloaded DOCX, wording added or changed by ArticleReady AI is shown in blue. Author-action items are shown in red. Exact unchanged wording remains black.",
+        "human_like_writing_layer_applied": mode == "ai_revision" and _strong_humanisation_enabled(),
+        "humanisation_strength": _humanisation_strength(),
         "quality_filters": [
+            "The same strong human-supervised academic writing layer used by the Article Writer is applied to article revision.",
+            "The post-processing pass is deterministic and protects confirmed evidence, citations, tables, equations, placeholders and references.",
             "Confirmed results and numerical evidence are preserved unless the author supplies a correction.",
             "Suggested additional analyses are not presented as completed analyses.",
             "Reviewer comments are addressed through a transparent response matrix when supplied.",
@@ -269,10 +335,10 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _plain_compare_text(text: str) -> str:
-    text = re.sub(r"^#{1,6}\s+", "", text.strip())
+    text = re.sub(r"^#{1,6}\s+", "", str(text or "").strip())
     text = re.sub(r"^[-*•]\s+", "", text)
     text = re.sub(r"^\d+[.)]\s+", "", text)
-    text = text.replace("**", "").replace("*", "")
+    text = _plain_inline_text(text)
     text = re.sub(r"\s+", " ", text)
     return text.strip().lower()
 
@@ -308,7 +374,14 @@ def _best_original_line(revised_line: str, original_lines: list[str], used: set[
     return best_line, best_score, best_index
 
 
-def _append_marked_run(paragraph, text: str, changed: bool, bold: bool = False, italic: bool = False) -> None:
+def _append_marked_run(
+    paragraph,
+    text: str,
+    changed: bool,
+    bold: bool = False,
+    italic: bool = False,
+    action_required: bool = False,
+) -> None:
     if not text:
         return
     from docx.shared import RGBColor
@@ -316,47 +389,59 @@ def _append_marked_run(paragraph, text: str, changed: bool, bold: bool = False, 
     run = paragraph.add_run(text)
     run.bold = bold
     run.italic = italic
-    if changed:
+    if action_required:
+        run.font.color.rgb = RGBColor(*_ACTION_RED)
+    elif changed:
         run.font.color.rgb = RGBColor(*_REVISION_BLUE)
 
 
+def _styled_diff_tokens(text: str) -> list[tuple[str, bool, bool, bool]]:
+    tokens: list[tuple[str, bool, bool, bool]] = []
+    for visible, bold, italic, action_required in _parse_inline_segments(text):
+        for token in _tokenise_for_diff(visible):
+            tokens.append((token, bold, italic, action_required))
+    return tokens
+
+
 def _add_diff_runs(paragraph, revised_text: str, original_text: str | None, changed_default: bool = True) -> None:
-    """Write revised text and colour inserted/replaced tokens blue while exact retained tokens remain black."""
+    """Render emphasis, keep revisions blue and override action-required text in red."""
+    revised_tokens = _styled_diff_tokens(revised_text)
     if not original_text:
-        _append_marked_run(paragraph, revised_text, True)
+        for token, bold, italic, action_required in revised_tokens:
+            _append_marked_run(
+                paragraph, token, True if token else changed_default, bold, italic, action_required
+            )
         return
 
-    revised_tokens = _tokenise_for_diff(revised_text)
-    original_tokens = _tokenise_for_diff(original_text)
+    original_tokens = _styled_diff_tokens(original_text)
     matcher = difflib.SequenceMatcher(
         None,
-        [_word_key(token) for token in original_tokens],
-        [_word_key(token) for token in revised_tokens],
+        [_word_key(token[0]) for token in original_tokens],
+        [_word_key(token[0]) for token in revised_tokens],
         autojunk=False,
     )
-    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
-        changed = tag != "equal"
-        chunk = "".join(revised_tokens[j1:j2])
-        _append_marked_run(paragraph, chunk, changed if chunk else changed_default)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        for offset, (token, bold, italic, action_required) in enumerate(revised_tokens[j1:j2]):
+            changed = tag != "equal"
+            if tag == "equal" and i1 + offset < i2:
+                original_token = original_tokens[i1 + offset]
+                # A formatting change is also a revision and should remain blue.
+                if not token.isspace():
+                    changed = (bold, italic) != (original_token[1], original_token[2])
+            _append_marked_run(paragraph, token, changed, bold, italic, action_required)
 
 
-def _add_black_inline_runs(paragraph, text: str) -> None:
-    position = 0
-    token_re = re.compile(r"(\*\*[^*]+\*\*|\*[^*]+\*)")
-    for match in token_re.finditer(text):
-        if match.start() > position:
-            paragraph.add_run(text[position:match.start()])
-        token = match.group(0)
-        if token.startswith("**"):
-            run = paragraph.add_run(token[2:-2])
-            run.bold = True
-        else:
-            run = paragraph.add_run(token[1:-1])
-            run.italic = True
-        position = match.end()
-    if position < len(text):
-        paragraph.add_run(text[position:])
-
+def _add_black_inline_runs(paragraph, text: str, force_bold: bool = False) -> None:
+    """Render Markdown emphasis in black, with action-required text in red."""
+    for visible, bold, italic, action_required in _parse_inline_segments(text):
+        _append_marked_run(
+            paragraph,
+            visible,
+            False,
+            bool(bold or force_bold),
+            italic,
+            action_required,
+        )
 
 def _revision_line_map(original_text: str, revised_lines: list[str]) -> dict[int, str | None]:
     original_lines = [line.rstrip() for line in _finalise_article_text(original_text).splitlines() if line.strip()]
@@ -384,8 +469,6 @@ def _revision_line_map(original_text: str, revised_lines: list[str]) -> dict[int
 
 
 def _add_revision_table(doc, lines: list[str], original_text: str, colour_revisions: bool = True) -> None:
-    from docx.shared import RGBColor
-
     rows: list[list[str]] = []
     for line in lines:
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
@@ -402,12 +485,21 @@ def _add_revision_table(doc, lines: list[str], original_text: str, colour_revisi
         for column in range(width):
             value = cells[column] if column < len(cells) else ""
             paragraph = row[column].paragraphs[0]
-            run = paragraph.add_run(value)
-            if row_index == 0:
-                run.bold = True
-            if colour_revisions and _plain_compare_text(value) and _plain_compare_text(value) not in original_norm:
-                run.font.color.rgb = RGBColor(*_REVISION_BLUE)
-
+            paragraph.clear()
+            if colour_revisions:
+                visible_value = _plain_compare_text(value)
+                changed = bool(visible_value and visible_value not in original_norm)
+                for visible, bold, italic, action_required in _parse_inline_segments(value):
+                    _append_marked_run(
+                        paragraph,
+                        visible,
+                        changed,
+                        bool(bold or row_index == 0),
+                        italic,
+                        action_required,
+                    )
+            else:
+                _add_black_inline_runs(paragraph, value, force_bold=row_index == 0)
 
 def _write_markdown_document(doc, markdown_text: str, original_text: str | None = None, colour_revisions: bool = False, heading_offset: int = 0) -> None:
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -561,7 +653,7 @@ def export_revised_article_docx(
 
     note = doc.add_paragraph()
     note.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = note.add_run("Revision display: wording added or changed by ArticleReady AI appears in blue. Exact unchanged wording remains black.")
+    run = note.add_run("Revision display: wording added or changed by ArticleReady AI appears in blue. Author-action items appear in red. Exact unchanged wording remains black.")
     run.italic = True
     run.font.size = Pt(9)
     run.font.color.rgb = RGBColor(89, 98, 115)

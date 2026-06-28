@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
+import random
 import re
 from datetime import datetime
 from typing import Any
@@ -25,9 +27,16 @@ _RETRACTION_TERMS = re.compile(
 )
 
 _ATTENTION_RE = re.compile(
-    r"\[(?:insert|verify|confirm|provide|supply|complete|replace|check|add|update|obtain|state|specify|include)\b[^\]]*\]",
+    r"\[(?:insert|verify|confirm|provide|supply|complete|replace|check|add|update|obtain|state|specify|include|revise|review|conduct|perform|run|collect|clarify|report|resolve|address|identify|upload|attach|calculate|test|assess|determine|seek|action|required|author\s+action)\b[^\]]*\]",
     flags=re.IGNORECASE,
 )
+
+_ACTION_LABEL_RE = re.compile(
+    r"\b(?:action required|author action|required action|remaining action|attention required|user action)\s*:\s*",
+    flags=re.IGNORECASE,
+)
+
+_ACTION_RED = (192, 0, 0)
 
 _ADAM_2020_REFERENCE = (
     "Adam, A. M. (2020). Sample size determination in survey research. "
@@ -354,16 +363,19 @@ def _survey_method_requirements(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _human_article_style_requirements(payload: dict[str, Any]) -> dict[str, Any]:
     return {
-        "style_goal": "publishable, human-supervised academic prose",
+        "style_goal": "publishable, strongly human-supervised academic prose",
         "rules": [
             "Write in formal British English with natural academic rhythm, not template-like AI prose.",
-            "Vary sentence and paragraph length according to argument needs, but keep grammar, citations, headings and tables clean.",
-            "Build paragraphs around claim, evidence, interpretation and contribution. Avoid paragraphs that merely list authors.",
+            "Use controlled high burstiness and strong lexical variation: combine concise emphasis with developed analytical sentences, without creating fragments or artificial mistakes.",
+            "Vary sentence and paragraph length according to argument needs, but keep grammar, citations, headings, tables, equations and references clean.",
+            "Build paragraphs around claim, evidence, interpretation, qualification and contribution. Avoid paragraphs that merely list authors.",
+            "Vary paragraph openings and transitions so consecutive paragraphs do not begin with the same formula.",
             "Use precise verbs such as indicates, qualifies, complicates, supports, constrains, extends and contradicts.",
             "Avoid filler phrases such as 'in today's world', 'it is important to note', 'delve into', 'plays a crucial role', and repeated 'moreover' or 'furthermore'.",
             "Use cautious scholarly judgement rather than promotional language. Do not overclaim practical or theoretical contributions.",
             "Maintain the author's voice through reasoned transitions, context-specific qualifiers and close links between the study objectives, methods, results and contribution.",
-            "Do not introduce typos, random grammar errors, lower-case sentence starts, broken citations or artificial mistakes.",
+            "Preserve all confirmed facts, statistics, citations, technical terms, placeholders and section logic during stylistic revision.",
+            "Do not introduce typos, random grammar errors, lower-case sentence starts, broken citations, invented evidence or artificial mistakes.",
         ],
     }
 
@@ -403,9 +415,26 @@ def _equation_and_framework_requirements(payload: dict[str, Any]) -> dict[str, A
     }
 
 
+def _strong_humanisation_requirements(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "mode": "strong_human_supervised",
+        "enabled_by_default": True,
+        "rules": [
+            "Apply controlled high burstiness and high lexical variation while preserving clarity, evidence and disciplinary precision.",
+            "Allow sentence length to vary naturally. Split overloaded sentences at defensible clause boundaries, but do not create fragments.",
+            "Vary paragraph shape and openings according to the argument rather than through random transition words.",
+            "Retain the user's confirmed facts, citations, statistics, quotations, placeholders, equations, tables and reference details exactly unless a substantive revision is justified by supplied evidence.",
+            "Remove generic filler and repetitive academic templates. Replace them with context-specific reasoning and precise verbs.",
+            "Do not randomise paragraph order, inject unrelated tangents, fabricate citations, or add deliberate grammatical errors.",
+            "Do not mention humanisation, AI detection or detector scores in the manuscript.",
+        ],
+    }
+
+
 def _article_prompt_quality_pack(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "human_article_style_requirements": _human_article_style_requirements(payload),
+        "strong_humanisation_requirements": _strong_humanisation_requirements(payload),
         "prose_objective_requirements": _prose_objective_requirements(payload),
         "survey_method_requirements": _survey_method_requirements(payload),
         "equation_and_framework_requirements": _equation_and_framework_requirements(payload),
@@ -430,10 +459,408 @@ def _light_human_article_polish(text: str) -> str:
     }
     out = text
     for pattern, repl in replacements.items():
-        out = re.sub(pattern, repl, out, flags=re.IGNORECASE)
+        def case_replacement(match: re.Match[str], replacement: str = repl) -> str:
+            if not replacement:
+                return replacement
+            return replacement[:1].upper() + replacement[1:] if match.group(0)[:1].isupper() else replacement
+        out = re.sub(pattern, case_replacement, out, flags=re.IGNORECASE)
     out = re.sub(r"\n{3,}", "\n\n", out)
     out = re.sub(r"[ \t]{2,}", " ", out)
     return out.strip()
+
+
+_HUMANISATION_OFF_VALUES = {"0", "false", "no", "off"}
+_SENTENCE_ABBREVIATIONS = (
+    "e.g.", "i.e.", "et al.", "Dr.", "Prof.", "Mr.", "Mrs.", "Ms.",
+    "Fig.", "Eq.", "No.", "Vol.", "pp.", "p.", "vs.", "etc.",
+)
+
+
+def _strong_humanisation_enabled() -> bool:
+    return os.getenv("ARTICLEREADY_STRONG_HUMANISATION", "1").strip().lower() not in _HUMANISATION_OFF_VALUES
+
+
+def _humanisation_strength() -> str:
+    value = os.getenv("ARTICLEREADY_HUMANISATION_STRENGTH", "strong").strip().lower()
+    return value if value in {"light", "standard", "strong"} else "strong"
+
+
+def _humanisation_rng(text: str, seed_text: str = "") -> random.Random:
+    salt = os.getenv("ARTICLEREADY_HUMANISATION_SEED_SALT", "articleready-v1")
+    digest = hashlib.sha256(f"{salt}|{seed_text}|{text[:4000]}".encode("utf-8", errors="ignore")).hexdigest()
+    return random.Random(int(digest[:16], 16))
+
+
+def _split_sentences_safe(text: str) -> list[str]:
+    if not text.strip():
+        return []
+    protected = text
+    token = "<AR_DOT>"
+    for abbr in _SENTENCE_ABBREVIATIONS:
+        protected = re.sub(
+            re.escape(abbr),
+            lambda match: match.group(0).replace(".", token),
+            protected,
+            flags=re.IGNORECASE,
+        )
+    protected = re.sub(r"(?<=\d)\.(?=\d)", token, protected)
+    parts = re.split(r'(?<=[.!?])\s+(?=[A-Z0-9\[\(“"])', protected)
+    return [part.replace(token, ".").strip() for part in parts if part.strip()]
+
+
+def _sentence_word_count(sentence: str) -> int:
+    return len(re.findall(r"\b[\w’'-]+\b", sentence))
+
+
+def _capitalise_sentence_start(text: str) -> str:
+    match = re.search(r"[A-Za-z]", text)
+    if not match:
+        return text
+    idx = match.start()
+    return text[:idx] + text[idx].upper() + text[idx + 1:]
+
+
+def _best_sentence_split(sentence: str) -> tuple[str, str] | None:
+    if _sentence_word_count(sentence) < 26:
+        return None
+    candidates: list[tuple[int, int]] = []
+    for match in re.finditer(r";\s+|:\s+|,\s+(?=(?:but|yet|however)\b)", sentence, flags=re.IGNORECASE):
+        left = sentence[:match.start()].strip()
+        right = sentence[match.end():].strip()
+        if _sentence_word_count(left) >= 9 and _sentence_word_count(right) >= 8:
+            candidates.append((match.start(), match.end()))
+    if not candidates:
+        return None
+    midpoint = len(sentence) / 2
+    start, end = min(candidates, key=lambda pair: abs(pair[0] - midpoint))
+    left = sentence[:start].rstrip(" ,;:") + "."
+    right = sentence[end:].strip()
+    separator = sentence[start:end].strip().lower()
+    if right.lower().startswith("but "):
+        right = "Even so, " + right[4:]
+    elif right.lower().startswith("yet "):
+        right = "Even so, " + right[4:]
+    elif separator.startswith(","):
+        conjunction = re.sub(r"^[,;:]\s*", "", separator).strip()
+        if conjunction and not right.lower().startswith(conjunction + " "):
+            right = conjunction.capitalize() + " " + right
+    right = _capitalise_sentence_start(right)
+    return left, right
+
+
+def _increase_natural_variation(text: str, rng: random.Random | None = None) -> str:
+    """Improve rhythm and remove repetitive stock phrases without adding new claims."""
+    if not text:
+        return text
+    rng = rng or _humanisation_rng(text)
+    replacements = {
+        r"\bin order to\b": "to",
+        r"\bdue to the fact that\b": "because",
+        r"\bthe fact that\b": "that",
+        r"\bas a result of\b": "because of",
+        r"\bit is important to note that\b": "",
+        r"\bit should be noted that\b": "",
+        r"\bthe present study seeks to\b": "this article",
+    }
+    out = text
+    for pattern, replacement in replacements.items():
+        def case_replacement(match: re.Match[str], value: str = replacement) -> str:
+            if not value:
+                return value
+            return value[:1].upper() + value[1:] if match.group(0)[:1].isupper() else value
+        out = re.sub(pattern, case_replacement, out, flags=re.IGNORECASE)
+    sentences = _split_sentences_safe(out)
+    if len(sentences) >= 2:
+        lengths = [_sentence_word_count(sentence) for sentence in sentences]
+        for index in sorted(range(len(sentences)), key=lambda i: lengths[i], reverse=True):
+            if lengths[index] < 34:
+                break
+            split = _best_sentence_split(sentences[index])
+            if split:
+                sentences[index:index + 1] = list(split)
+                break
+        repeated_openers = {
+            "this study": ["The present article", "The analysis", "This investigation"],
+            "the findings": ["These results", "The evidence", "The reported findings"],
+            "the results": ["These results", "The evidence", "The estimates"],
+        }
+        previous = ""
+        counts: dict[str, int] = {}
+        for index, sentence in enumerate(sentences):
+            match = re.match(r"([A-Za-z]+(?:\s+[A-Za-z]+)?)", sentence)
+            opener = match.group(1).lower() if match else ""
+            if opener == previous and opener in repeated_openers:
+                count = counts.get(opener, 0)
+                replacement = repeated_openers[opener][count % len(repeated_openers[opener])]
+                counts[opener] = count + 1
+                sentences[index] = re.sub(rf"^{re.escape(match.group(1))}", replacement, sentence, count=1, flags=re.IGNORECASE)
+                opener = replacement.lower()
+            previous = opener
+        out = " ".join(sentences)
+    return re.sub(r"[ \t]{2,}", " ", out).strip()
+
+
+def _enforce_burstiness(
+    text: str,
+    target_std_dev: float = 10.0,
+    max_uniform: int = 3,
+    rng: random.Random | None = None,
+) -> str:
+    """Increase sentence-length variation by splitting overloaded sentences at safe boundaries."""
+    if not text or len(text) < 180:
+        return text
+    rng = rng or _humanisation_rng(text)
+    sentences = _split_sentences_safe(text)
+    if len(sentences) < 2:
+        return text
+
+    def spread(items: list[str]) -> float:
+        lengths = [_sentence_word_count(item) for item in items]
+        mean = sum(lengths) / max(1, len(lengths))
+        return (sum((value - mean) ** 2 for value in lengths) / max(1, len(lengths))) ** 0.5
+
+    attempts = 0
+    while spread(sentences) < target_std_dev and attempts < 3:
+        attempts += 1
+        lengths = [_sentence_word_count(sentence) for sentence in sentences]
+        candidates = [i for i, length in enumerate(lengths) if length >= 28]
+        if not candidates:
+            break
+        index = max(candidates, key=lambda i: lengths[i])
+        split = _best_sentence_split(sentences[index])
+        if not split:
+            break
+        sentences[index:index + 1] = list(split)
+
+    # Break long runs of similarly sized sentences only when a safe split is available.
+    run = 1
+    lengths = [_sentence_word_count(sentence) for sentence in sentences]
+    for index in range(1, len(sentences)):
+        if abs(lengths[index] - lengths[index - 1]) <= 3:
+            run += 1
+        else:
+            run = 1
+        if run > max_uniform and lengths[index] >= 28:
+            split = _best_sentence_split(sentences[index])
+            if split:
+                sentences[index:index + 1] = list(split)
+                break
+    return " ".join(sentences).strip()
+
+
+def _add_drafting_artefacts(
+    text: str,
+    probability_per_500_words: float = 0.35,
+    rng: random.Random | None = None,
+) -> str:
+    """Add restrained scholarly texture by removing formulaic transitions, without adding errors or claims."""
+    if not text or len(text.split()) < 120:
+        return text
+    rng = rng or _humanisation_rng(text)
+    if rng.random() > probability_per_500_words:
+        return text
+    substitutions = [
+        (r"^Furthermore,\s+", ""),
+        (r"^Moreover,\s+", ""),
+        (r"^It is also important to note that\s+", ""),
+        (r"^In addition,\s+", "More specifically, "),
+    ]
+    out = text
+    for pattern, replacement in substitutions:
+        if re.search(pattern, out, flags=re.IGNORECASE):
+            out = re.sub(pattern, replacement, out, count=1, flags=re.IGNORECASE)
+            return _capitalise_sentence_start(out)
+    return out
+
+
+def _boost_lexical_richness(
+    text: str,
+    replacement_probability: float = 0.35,
+    rng: random.Random | None = None,
+) -> str:
+    """Reduce repetitive academic phrasing using meaning-preserving substitutions."""
+    if not text or len(text.split()) < 40:
+        return text
+    rng = rng or _humanisation_rng(text)
+    replacements = [
+        (r"\bshows that\b", "indicates that"),
+        (r"\bsuggests that\b", "points to"),
+        (r"\bdemonstrates that\b", "provides evidence that"),
+        (r"\bimportant role\b", "substantive role"),
+        (r"\bmany studies\b", "a substantial body of research"),
+        (r"\bfor example\b", "for instance"),
+        (r"\bin contrast\b", "by contrast"),
+        (r"\bhas been shown to\b", "has been found to"),
+    ]
+    out = text
+    applied = False
+    def replace_once(source: str, pattern: str, replacement: str) -> str:
+        def case_replacement(match: re.Match[str]) -> str:
+            return replacement[:1].upper() + replacement[1:] if match.group(0)[:1].isupper() else replacement
+        return re.sub(pattern, case_replacement, source, count=1, flags=re.IGNORECASE)
+
+    for pattern, replacement in replacements:
+        if rng.random() <= replacement_probability and re.search(pattern, out, flags=re.IGNORECASE):
+            out = replace_once(out, pattern, replacement)
+            applied = True
+    if not applied and replacement_probability >= 0.30:
+        for pattern, replacement in replacements:
+            if re.search(pattern, out, flags=re.IGNORECASE):
+                out = replace_once(out, pattern, replacement)
+                break
+    return out
+
+
+def _cluster_citations(text: str) -> str:
+    """Compatibility hook: citations are preserved and never fabricated or moved mechanically."""
+    return text or ""
+
+
+def _vary_paragraph_openings(text: str) -> str:
+    """Reduce repeated paragraph openings with conservative, article-appropriate alternatives."""
+    paragraphs = re.split(r"(\n\s*\n)", text or "")
+    previous_opener = ""
+    alternatives = {
+        "this study": ["The present article", "The analysis", "This investigation"],
+        "the findings": ["These results", "The evidence", "The reported findings"],
+        "the results": ["These results", "The evidence", "The estimates"],
+    }
+    counters: dict[str, int] = {}
+    for index in range(0, len(paragraphs), 2):
+        paragraph = paragraphs[index]
+        stripped = paragraph.lstrip()
+        if not stripped or stripped.startswith(("#", "|", "- ", "* ")):
+            continue
+        match = re.match(r"([A-Za-z]+(?:\s+[A-Za-z]+)?)", stripped)
+        opener = match.group(1).lower() if match else ""
+        if opener == previous_opener and opener in alternatives:
+            count = counters.get(opener, 0)
+            replacement = alternatives[opener][count % len(alternatives[opener])]
+            counters[opener] = count + 1
+            leading = paragraph[: len(paragraph) - len(stripped)]
+            stripped = re.sub(rf"^{re.escape(match.group(1))}", replacement, stripped, count=1, flags=re.IGNORECASE)
+            paragraphs[index] = leading + stripped
+            opener = replacement.lower()
+        previous_opener = opener
+    return "".join(paragraphs)
+
+
+def _force_short_sentences(text: str, target_every_n_words: int = 220) -> str:
+    """Create occasional concise sentences by safely splitting existing long sentences."""
+    words = re.findall(r"\b[\w’'-]+\b", text or "")
+    if len(words) < target_every_n_words:
+        return text
+    sentences = _split_sentences_safe(text)
+    if any(_sentence_word_count(sentence) <= 9 for sentence in sentences):
+        return text
+    candidates = sorted(
+        ((index, _sentence_word_count(sentence)) for index, sentence in enumerate(sentences)),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    for index, length in candidates:
+        if length < 30:
+            break
+        split = _best_sentence_split(sentences[index])
+        if split:
+            sentences[index:index + 1] = list(split)
+            return " ".join(sentences)
+    return text
+
+
+def _add_human_noise(text: str, error_probability: float = 0.0) -> str:
+    """Compatibility hook. ArticleReady never introduces deliberate mistakes or citation damage."""
+    return text or ""
+
+
+def _protect_humanisation_regions(text: str) -> tuple[str, dict[str, str]]:
+    protected: dict[str, str] = {}
+
+    def replace(match: re.Match[str]) -> str:
+        key = f"<AR_PROTECTED_{len(protected)}>"
+        protected[key] = match.group(0)
+        return key
+
+    out = re.sub(r"```.*?```", replace, text, flags=re.DOTALL)
+    out = re.sub(r"(?ms)^\$\$\s*$.*?^\$\$\s*$", replace, out)
+    return out, protected
+
+
+def _restore_humanisation_regions(text: str, protected: dict[str, str]) -> str:
+    out = text
+    for key, value in protected.items():
+        out = out.replace(key, value)
+    return out
+
+
+def _is_humanisable_block(block: str) -> bool:
+    stripped = block.strip()
+    if not stripped or stripped.startswith("<AR_PROTECTED_"):
+        return False
+    if stripped.startswith(("#", "|", "- ", "* ")):
+        return False
+    if re.match(r"^\d+[.)]\s+", stripped):
+        return False
+    if any(line.lstrip().startswith("|") for line in stripped.splitlines()):
+        return False
+    if re.match(r"^(Funding|Conflict of interest|Ethics approval|Data availability):", stripped, flags=re.IGNORECASE):
+        return False
+    return len(re.findall(r"\b[\w’'-]+\b", stripped)) >= 18
+
+
+def _apply_strong_article_humanisation(
+    text: str,
+    *,
+    seed_text: str = "",
+    preserve_reference_section: bool = True,
+) -> str:
+    """Apply the strong, evidence-safe humanisation layer adapted from ai_service.py.
+
+    The pass is deterministic for the same text and seed. It changes prose rhythm and
+    repetitive wording, but protects headings, tables, code blocks, equations, citations,
+    placeholders, references and article structure.
+    """
+    if not text or not _strong_humanisation_enabled():
+        return text
+    strength = _humanisation_strength()
+    if strength == "light":
+        target_std, lexical_probability, texture_probability = 7.0, 0.18, 0.15
+    elif strength == "standard":
+        target_std, lexical_probability, texture_probability = 8.5, 0.25, 0.25
+    else:
+        target_std, lexical_probability, texture_probability = 10.0, 0.35, 0.35
+
+    reference_tail = ""
+    body = text
+    if preserve_reference_section:
+        match = re.search(r"(?im)^#{1,4}\s+(references|source use audit)\s*$", text)
+        if match:
+            body = text[:match.start()].rstrip()
+            reference_tail = "\n\n" + text[match.start():].lstrip()
+
+    protected_body, protected = _protect_humanisation_regions(body)
+    blocks = re.split(r"(\n\s*\n)", protected_body)
+    rng = _humanisation_rng(text, seed_text)
+    for index in range(0, len(blocks), 2):
+        block = blocks[index]
+        if not _is_humanisable_block(block):
+            continue
+        polished = _light_human_article_polish(block)
+        polished = _increase_natural_variation(polished, rng)
+        polished = _enforce_burstiness(polished, target_std_dev=target_std, rng=rng)
+        polished = _add_drafting_artefacts(polished, probability_per_500_words=texture_probability, rng=rng)
+        polished = _boost_lexical_richness(polished, replacement_probability=lexical_probability, rng=rng)
+        polished = _cluster_citations(polished)
+        polished = _force_short_sentences(polished, target_every_n_words=220)
+        polished = _add_human_noise(polished)
+        blocks[index] = polished
+
+    output = "".join(blocks)
+    output = _vary_paragraph_openings(output)
+    output = _restore_humanisation_regions(output, protected)
+    output = re.sub(r"[ \t]{2,}", " ", output)
+    output = re.sub(r"\n{3,}", "\n\n", output).strip()
+    return output + reference_tail
 
 
 def _is_independent_article(payload: dict[str, Any]) -> bool:
@@ -852,6 +1279,8 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
                 "Do not reproduce proprietary questionnaire items. When a scale may be copyrighted, identify the source and state that permission or licensing must be checked.",
                 "If include_instrument_draft is true, draft a separate original provisional questionnaire, interview guide or measurement plan aligned with the objectives. Do not present it as validated until it has been tested.",
                 "Write in polished formal British English, minimise long dashes, use prose-led objectives and maintain a focused article contribution.",
+                "Apply the strong_humanisation_requirements in the quality pack: use controlled high burstiness, varied paragraph shape, precise lexical variation and natural transitions while preserving all evidence, citations, tables, equations and placeholders.",
+                "Do not randomise paragraph order, inject tangents, introduce deliberate mistakes, or mention AI detection or humanisation in the article.",
                 "Use only confirmed results in Stage 2 or full-article mode. Metadata abstracts do not justify detailed claims about a paper's findings.",
                 "References must contain only cited and verified sources. Include a Source Use Audit when source records are supplied.",
             ],
@@ -867,6 +1296,9 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
                 model=model,
                 instructions=(
                     "You are ArticleReady AI's staged journal article development assistant. Respect the selected stage. "
+                    "Apply the supplied strong human-supervised academic writing layer: use natural sentence-length variation, varied paragraph openings, "
+                    "precise disciplinary language and evidence-led reasoning while preserving citations, technical terms, tables, equations and placeholders. "
+                    "Do not add deliberate errors, unrelated tangents, or commentary about AI detection or humanisation. "
                     "For a new independent study, stop the article body at Methods and provide data-source or instrument guidance without inventing access or validated items. "
                     "For Stage 2, use the uploaded previous sections and results to complete the manuscript."
                 ),
@@ -889,6 +1321,16 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
     instrument_text = _finalise_article_text(instrument_text) if instrument_text else ""
     if payload["draft_stage"] == "initial_to_methods":
         article_text = _enforce_initial_scope(article_text)
+    if mode == "ai_draft":
+        article_text = _apply_strong_article_humanisation(
+            article_text,
+            seed_text="|".join([
+                str(payload.get("article_title") or ""),
+                str(payload.get("article_type") or ""),
+                str(payload.get("draft_stage") or ""),
+            ]),
+        )
+        article_text = _finalise_article_text(article_text)
 
     return {
         "article_text": article_text,
@@ -908,7 +1350,10 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
         "excluded_retracted_titles": [str(s.get("title") or "Untitled") for s in blocked[:10]],
         "provider_errors": provider_errors,
         "reference_depth_guidance": _article_reference_expectations(str(payload.get("article_type") or "")),
+        "strong_humanisation_applied": mode == "ai_draft" and _strong_humanisation_enabled(),
+        "humanisation_strength": _humanisation_strength(),
         "quality_filters": [
+            "The strong human-supervised writing layer varies sentence rhythm, paragraph shape and wording without changing confirmed evidence or article structure.",
             "Independent-article mode disables thesis, dissertation and project source fields.",
             "Stage 1 stops the article body at Methods. Stage 2 requires previous sections and completed results or analysis.",
             "Candidate secondary datasets and instruments must be checked for fit, access, permission and validity.",
@@ -918,33 +1363,124 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
         ],
     }
 
-def _add_inline_runs(paragraph, text: str) -> None:
-    """Add basic bold/italic and attention placeholder styling to a paragraph."""
-    from docx.shared import RGBColor
-    pos = 0
-    token_re = re.compile(r"(\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\])")
-    for match in token_re.finditer(text):
-        if match.start() > pos:
-            paragraph.add_run(text[pos:match.start()])
-        token = match.group(0)
-        run_text = token
-        bold = False
-        italic = False
-        if token.startswith("**") and token.endswith("**"):
-            run_text = token[2:-2]
-            bold = True
-        elif token.startswith("*") and token.endswith("*"):
-            run_text = token[1:-1]
-            italic = True
-        run = paragraph.add_run(run_text)
-        run.bold = bold
-        run.italic = italic
-        if _ATTENTION_RE.fullmatch(token):
-            run.font.color.rgb = RGBColor(192, 0, 0)
-        pos = match.end()
-    if pos < len(text):
-        paragraph.add_run(text[pos:])
+def _normalise_inline_markdown(text: str) -> str:
+    """Normalise common Markdown emphasis typos before DOCX rendering."""
+    value = str(text or "")
+    # Common model-output typo: one extra closing marker, for example **text***.
+    value = re.sub(r"(?<!\*)\*\*(?!\*)([^*\n]+)\*{3}(?=$|[\s.,;:!?])", r"**\1**", value)
+    value = re.sub(r"(?<!\*)\*(?!\*)([^*\n]+)\*{2}(?=$|[\s.,;:!?])", r"*\1*", value)
+    value = re.sub(r"(?<!_)__(?!_)([^_\n]+)_{3}(?=$|[\s.,;:!?])", r"__\1__", value)
+    value = re.sub(r"(?<!_)_(?!_)([^_\n]+)_{2}(?=$|[\s.,;:!?])", r"_\1_", value)
+    return value
 
+
+def _strip_stray_inline_markers(text: str) -> str:
+    """Remove unmatched emphasis markers at word boundaries without touching multiplication signs."""
+    value = str(text or "")
+    value = re.sub(r"(?<!\w)\*{1,3}(?=\w)", "", value)
+    value = re.sub(r"(?<=\w)\*{1,3}(?=$|[\s.,;:!?])", "", value)
+    value = re.sub(r"(?<!\w)_{1,3}(?=\w)", "", value)
+    value = re.sub(r"(?<=\w)_{1,3}(?=$|[\s.,;:!?])", "", value)
+    return value
+
+
+def _split_action_segments(text: str, bold: bool = False, italic: bool = False) -> list[tuple[str, bool, bool, bool]]:
+    """Split visible text into normal and author-action segments."""
+    value = str(text or "")
+    if not value:
+        return []
+    segments: list[tuple[str, bool, bool, bool]] = []
+    position = 0
+    bracket_re = re.compile(r"\[[^\]\n]+\]")
+    for match in bracket_re.finditer(value):
+        if match.start() > position:
+            prefix = value[position:match.start()]
+            label = _ACTION_LABEL_RE.search(prefix)
+            if label:
+                if label.start() > 0:
+                    segments.append((prefix[:label.start()], bold, italic, False))
+                segments.append((prefix[label.start():], bold, italic, True))
+            else:
+                segments.append((prefix, bold, italic, False))
+        token = match.group(0)
+        segments.append((token, bold, italic, bool(_ATTENTION_RE.fullmatch(token))))
+        position = match.end()
+    if position < len(value):
+        tail = value[position:]
+        label = _ACTION_LABEL_RE.search(tail)
+        if label:
+            if label.start() > 0:
+                segments.append((tail[:label.start()], bold, italic, False))
+            segments.append((tail[label.start():], bold, italic, True))
+        else:
+            segments.append((tail, bold, italic, False))
+    if not segments:
+        label = _ACTION_LABEL_RE.search(value)
+        if label:
+            if label.start() > 0:
+                segments.append((value[:label.start()], bold, italic, False))
+            segments.append((value[label.start():], bold, italic, True))
+        else:
+            segments.append((value, bold, italic, False))
+    return [(part, b, i, action) for part, b, i, action in segments if part]
+
+
+def _parse_inline_segments(text: str) -> list[tuple[str, bool, bool, bool]]:
+    """Parse Markdown emphasis and action placeholders into DOCX-ready segments.
+
+    The returned tuples are: visible text, bold, italic and action-required.
+    """
+    value = _normalise_inline_markdown(text)
+    style_re = re.compile(
+        r"(?P<bolditalic>\*\*\*(?P<bolditalic_text>.+?)\*\*\*)"
+        r"|(?P<bold>\*\*(?P<bold_text>.+?)\*\*)"
+        r"|(?P<italic>(?<!\*)\*(?!\*)(?P<italic_text>.+?)(?<!\*)\*(?!\*))"
+        r"|(?P<bolditalic_u>___(?P<bolditalic_u_text>.+?)___)"
+        r"|(?P<bold_u>__(?P<bold_u_text>.+?)__)"
+        r"|(?P<italic_u>(?<!\w)_(?!_)(?P<italic_u_text>.+?)(?<!_)_(?!\w))",
+        flags=re.DOTALL,
+    )
+    segments: list[tuple[str, bool, bool, bool]] = []
+    position = 0
+    for match in style_re.finditer(value):
+        if match.start() > position:
+            plain = _strip_stray_inline_markers(value[position:match.start()])
+            segments.extend(_split_action_segments(plain))
+        if match.group("bolditalic") is not None:
+            inner, bold, italic = match.group("bolditalic_text"), True, True
+        elif match.group("bold") is not None:
+            inner, bold, italic = match.group("bold_text"), True, False
+        elif match.group("italic") is not None:
+            inner, bold, italic = match.group("italic_text"), False, True
+        elif match.group("bolditalic_u") is not None:
+            inner, bold, italic = match.group("bolditalic_u_text"), True, True
+        elif match.group("bold_u") is not None:
+            inner, bold, italic = match.group("bold_u_text"), True, False
+        else:
+            inner, bold, italic = match.group("italic_u_text"), False, True
+        segments.extend(_split_action_segments(inner or "", bold=bold, italic=italic))
+        position = match.end()
+    if position < len(value):
+        segments.extend(_split_action_segments(_strip_stray_inline_markers(value[position:])))
+    if not segments and value:
+        segments.extend(_split_action_segments(_strip_stray_inline_markers(value)))
+    return segments
+
+
+def _plain_inline_text(text: str) -> str:
+    return "".join(segment[0] for segment in _parse_inline_segments(text))
+
+
+def _add_inline_runs(paragraph, text: str, force_bold: bool = False) -> None:
+    """Render Markdown emphasis and colour author-action text red."""
+    from docx.shared import RGBColor
+
+    for visible, bold, italic, action_required in _parse_inline_segments(text):
+        run = paragraph.add_run(visible)
+        run.bold = bool(bold or force_bold)
+        run.italic = bool(italic)
+        if action_required:
+            run.font.color.rgb = RGBColor(*_ACTION_RED)
 
 def _add_markdown_table(doc, lines: list[str]) -> None:
     rows = []
@@ -960,13 +1496,10 @@ def _add_markdown_table(doc, lines: list[str]) -> None:
     for row_idx, cells in enumerate(rows):
         row = table.add_row().cells
         for i in range(width):
-            row[i].text = cells[i] if i < len(cells) else ""
-        if row_idx == 0:
-            for cell in row:
-                for p in cell.paragraphs:
-                    for run in p.runs:
-                        run.bold = True
-
+            value = cells[i] if i < len(cells) else ""
+            paragraph = row[i].paragraphs[0]
+            paragraph.clear()
+            _add_inline_runs(paragraph, value, force_bold=row_idx == 0)
 
 def _add_equation_paragraph(doc, equation: str) -> None:
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -1060,12 +1593,15 @@ def export_article_docx(article_text: str, title: str = "Journal Article Draft")
         if not stripped:
             continue
         if line.startswith("# "):
-            p = doc.add_heading(line[2:].strip(), level=0)
+            p = doc.add_heading("", level=0)
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _add_inline_runs(p, line[2:].strip())
         elif line.startswith("## "):
-            doc.add_heading(line[3:].strip(), level=1)
+            p = doc.add_heading("", level=1)
+            _add_inline_runs(p, line[3:].strip())
         elif line.startswith("### "):
-            doc.add_heading(line[4:].strip(), level=2)
+            p = doc.add_heading("", level=2)
+            _add_inline_runs(p, line[4:].strip())
         elif re.match(r"^[-*•]\s+", line):
             p = doc.add_paragraph(style="List Bullet")
             _add_inline_runs(p, re.sub(r"^[-*•]\s+", "", line).strip())
