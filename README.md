@@ -132,3 +132,7 @@ PYTHONPATH=. pytest -q
 ```
 
 The test suite covers article ideas, strict topic-source filtering, duplicate-query control, secondary-data guidance, independent-article wording, independent-article Stage 1, instrument drafting, Stage 2 validation, file extraction, article revision fallback, revision-package parsing and blue-revision DOCX export.
+
+## Strong human-supervised writing layer
+
+Article drafting and article revision use the same evidence-safe writing layer. It improves sentence rhythm, paragraph variation and repetitive wording while preserving confirmed facts, citations, tables, equations, placeholders and references. Configure it with `ARTICLEREADY_STRONG_HUMANISATION`, `ARTICLEREADY_HUMANISATION_STRENGTH` and `ARTICLEREADY_HUMANISATION_SEED_SALT`.
