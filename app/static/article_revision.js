@@ -117,7 +117,7 @@ form.addEventListener('submit', async (event) => {
     copyMatrixBtn.disabled = reviewerMatrixPanel.hidden;
     const sourceCount = Number(data.source_bank_count || 0);
     const errors = Array.isArray(data.provider_errors) ? data.provider_errors.filter(Boolean) : [];
-    revisionMeta.innerHTML = `<strong>${data.mode === 'ai_revision' ? 'AI revision completed' : 'Fallback output returned'}.</strong> Model: ${data.model_used || 'none'}. ${sourceCount} scholarly record(s) passed to the revision workflow. ${data.revision_colour_note || ''}`;
+    revisionMeta.innerHTML = `<strong>${data.mode === 'ai_revision' ? 'Revision completed' : 'Fallback output returned'}.</strong> ${sourceCount} scholarly record(s) passed to the revision workflow. ${data.revision_colour_note || ''}`;
     enableOutputs(Boolean(revisedArticle.value.trim()));
     message(errors.length ? `Revision completed with ${errors.length} provider warning(s). Review the report before using the manuscript.` : 'Revision completed. Review the manuscript, report and any suggested analyses before downloading.');
   } catch (error) {
