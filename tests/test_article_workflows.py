@@ -199,3 +199,64 @@ def test_article_ideas_use_deepseek_v4_pro_only(monkeypatch):
     assert captured["extra_body"]["reasoning_effort"] == "high"
     assert result["model_used"] == "deepseek-v4-pro"
     assert result["mode"] == "ai_generated"
+
+
+def test_independent_term_structure_ideas_are_secondary_and_thesis_free(monkeypatch):
+    import re
+
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    result = generate_article_ideas(
+        {
+            "research_area": "term structure of interest rate in Ghana",
+            "source_mode": "Develop as a new independent article",
+            "discipline": "Finance",
+            "context": "Ghana",
+            "article_type": "Empirical research article",
+            "research_route": "Auto",
+            "max_ideas": 8,
+            "include_source_search": False,
+            "include_research_resource_search": True,
+        }
+    )
+    rendered = " ".join(str(idea) for idea in result["ideas"])
+    assert not re.search(r"\b(thesis|dissertation)\b", rendered, flags=re.IGNORECASE)
+    assert all(idea["research_route"] == "secondary_data" for idea in result["ideas"])
+    assert result["research_resources"]["data_sources"]
+    assert not result["research_resources"]["instrument_sources"]
+    assert result["ideas"][0]["readiness_score"] < 70
+
+
+def test_topic_source_filter_rejects_weak_keyword_and_country_matches():
+    from app.article_ideas_service import _filter_topic_sources
+
+    payload = {
+        "research_area": "term structure of interest rate in Ghana",
+        "context": "Ghana",
+    }
+    sources = [
+        {"title": "Testing the expectations hypothesis of the term structure of interest rate: the case of Ghana"},
+        {"title": "The Term Structure of Interest Rates"},
+        {"title": "Effects of interest rate on bank dividends in Ghana"},
+        {"title": "Psychometric properties of an African career interest inventory in Ghana"},
+    ]
+    retained, excluded = _filter_topic_sources(sources, payload, 10)
+    titles = [item["title"] for item in retained]
+    assert excluded == 2
+    assert "The Term Structure of Interest Rates" in titles
+    assert all("career interest" not in title.lower() for title in titles)
+    assert all("bank dividends" not in title.lower() for title in titles)
+
+
+def test_source_query_deduplicates_repeated_topic_and_context():
+    from app.source_finder import build_source_query
+
+    query = build_source_query(
+        {
+            "title": "term structure of interest rate in Ghana",
+            "research_area": "term structure of interest rate in Ghana",
+            "study_context": "Ghana",
+            "objectives": [],
+        },
+        "term structure of interest rate in Ghana",
+    )
+    assert query.lower().count("term structure of interest rate in ghana") == 1
