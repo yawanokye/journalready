@@ -10,6 +10,14 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.11
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: DEEPSEEK_ARTICLE_IDEA_MODEL
+        value: deepseek-v4-pro
+      - key: DEEPSEEK_ARTICLE_IDEA_THINKING
+        value: "1"
+      - key: DEEPSEEK_ARTICLE_IDEA_REASONING_EFFORT
+        value: high
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENALEX_MAILTO

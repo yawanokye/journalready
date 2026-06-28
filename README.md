@@ -19,6 +19,10 @@ The `/topic-ideas` page develops publication-focused ideas from a thesis, disser
 
 Candidate resources are not automatic endorsements. Users must verify variable coverage, time and geographic coverage, population fit, access conditions, copyright or licence terms, ethics and validation requirements.
 
+#### AI provider for article ideas
+
+Article Topic Ideas use **DeepSeek V4 Pro** through the official DeepSeek OpenAI-compatible API. This provider is isolated to `app/article_ideas_service.py`. The Article Writer continues to use the configured OpenAI models. If `DEEPSEEK_API_KEY` is missing or a DeepSeek request fails, the topic-idea workflow uses its structured fallback rather than switching silently to OpenAI.
+
 ### 2. Article Writer
 
 The `/article-writer` page now supports three writing stages:
@@ -78,6 +82,14 @@ Use:
 - Build command: `python -m pip install --upgrade pip setuptools wheel && python -m pip install -r requirements.txt`
 - Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
 - Health check path: `/health`
+
+Add these Render environment variables:
+
+- `DEEPSEEK_API_KEY`: your DeepSeek API key
+- `DEEPSEEK_ARTICLE_IDEA_MODEL`: `deepseek-v4-pro`
+- `DEEPSEEK_ARTICLE_IDEA_THINKING`: `1`
+- `DEEPSEEK_ARTICLE_IDEA_REASONING_EFFORT`: `high`
+- `OPENAI_API_KEY`: retained for article drafting only
 
 The additional upload dependencies are already listed in `requirements.txt`:
 
