@@ -331,3 +331,40 @@ input:focus, select:focus, textarea:focus { outline: 3px solid rgba(30,94,255,.1
   font-size: .78rem;
 }
 [hidden] { display: none !important; }
+
+/* Article polishing and revision module */
+.revision-layout { grid-template-columns: minmax(390px, .92fr) minmax(500px, 1.08fr); }
+.revision-blue-note {
+  margin-top: 14px;
+  padding: 11px 13px;
+  border-radius: 12px;
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  color: #075985;
+  font-weight: 800;
+}
+.revision-focus-panel {
+  margin: 18px 0;
+  padding: 17px;
+  border: 1px solid #bfdbfe;
+  border-left: 5px solid #0070c0;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #f4f9ff 0%, #ffffff 100%);
+}
+.revision-focus-panel h3 { margin-top: 0; }
+.revision-focus-panel .check { margin: 10px 0 !important; }
+.revision-output-panel { position: sticky; top: 92px; max-height: calc(100vh - 112px); overflow: auto; }
+.revision-article-box { min-height: 760px; }
+.revision-report-panel { padding-top: 22px; border-top: 1px solid var(--line); }
+.revision-report-box { min-height: 480px; }
+.revision-matrix-box { min-height: 320px; }
+.status.error { color: #b42318; }
+
+@media (min-width: 1050px) {
+  .module-grid.three-modules { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 900px) {
+  .revision-layout { grid-template-columns: 1fr; }
+  .revision-output-panel { position: static; max-height: none; }
+}

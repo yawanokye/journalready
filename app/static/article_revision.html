@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Article Polishing and Revision | ArticleReady AI</title>
+  <link rel="stylesheet" href="/static/styles.css?v=20260628-revision">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><span class="brand-mark">AR</span><span>ArticleReady AI</span></a>
+    <nav class="nav"><a href="/">Home</a><a href="/topic-ideas">Article Topic Ideas</a><a href="/article-writer">Article Writer</a><a href="/article-revision" aria-current="page">Article Revision</a></nav>
+  </header>
+
+  <main class="shell">
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">Article polishing and revision</p>
+        <h1>Strengthen an existing article for journal submission.</h1>
+        <p class="lead">Revise the article’s conceptualisation, contribution, method fit, analysis logic, discussion and recommendations without inventing evidence. Reviewer comments can be pasted or uploaded and addressed through a response matrix.</p>
+      </div>
+      <aside class="hero-note">
+        <h2>Evidence-preserving revision</h2>
+        <p>Confirmed data, coefficients, quotations and findings are preserved. When stronger analysis is needed, the system recommends it and identifies the evidence required rather than pretending it was completed.</p>
+        <p class="revision-blue-note">Downloaded revisions appear in blue. Exact unchanged wording remains black.</p>
+      </aside>
+    </section>
+
+    <section class="grid-two revision-layout">
+      <form id="revisionForm" class="card form-card">
+        <h2>1. Existing article</h2>
+        <label><span class="field-label">Article title *</span><input id="articleTitle" required placeholder="Current or proposed article title"></label>
+        <label><span class="field-label">Upload article</span><input id="articleFile" type="file" accept=".docx,.pdf,.txt,.md,.rtf,.json"></label>
+        <button type="button" class="secondary compact-upload" id="extractArticleBtn">Extract article text</button>
+        <label class="priority"><span class="field-label">Existing article text *</span><textarea id="articleText" rows="18" required placeholder="Paste the full manuscript or extract it from an uploaded file."></textarea><span class="help">The revision is grounded in this text. Tables may be pasted as Markdown or extracted from DOCX.</span></label>
+        <p id="uploadStatus" class="status"></p>
+
+        <h2>2. Revision direction</h2>
+        <div class="two-cols">
+          <label><span class="field-label">Article type</span><select id="articleType"><option>Empirical research article</option><option>Systematic review</option><option>Scoping review</option><option>Conceptual article</option><option>Methodological article</option><option>Case study article</option><option>Policy or practice article</option><option>Short communication</option></select></label>
+          <label><span class="field-label">Revision level</span><select id="revisionLevel"><option>Language and clarity polish</option><option>Substantive scholarly revision</option><option selected>Publication-readiness overhaul</option></select></label>
+        </div>
+        <div class="two-cols">
+          <label><span class="field-label">Research area</span><input id="researchArea" placeholder="e.g. Finance, Education, Procurement"></label>
+          <label><span class="field-label">Study context</span><input id="context" placeholder="Country, sector, population or period"></label>
+        </div>
+        <label><span class="field-label">Target journal</span><input id="targetJournal" placeholder="Optional journal name"></label>
+        <label><span class="field-label">Journal aims and scope</span><textarea id="journalScope" rows="3" placeholder="Paste the journal aims, scope or recent article themes"></textarea></label>
+        <label><span class="field-label">Author guidelines</span><textarea id="authorGuidelines" rows="3" placeholder="Paste structure, word limit, abstract, table, reference or reporting requirements"></textarea></label>
+        <div class="two-cols">
+          <label><span class="field-label">Word limit</span><input id="wordLimit" placeholder="e.g. 7,000 words"></label>
+          <label><span class="field-label">Citation style</span><select id="citationStyle"><option>APA 7th</option><option>Harvard</option><option>Chicago author-date</option><option>Vancouver</option><option>IEEE</option><option>Journal-specific style</option></select></label>
+        </div>
+        <label><span class="field-label">Methodology currently used</span><textarea id="methodology" rows="4" placeholder="Describe the design, sample, measurement, analysis and robustness procedures used."></textarea></label>
+        <label><span class="field-label">Confirmed data, results or analysis evidence</span><textarea id="dataResults" rows="5" placeholder="Paste or summarise the actual findings, tables, coefficients, themes, diagnostics and robustness results. The app will not invent missing output."></textarea></label>
+        <label><span class="field-label">Current contribution claim</span><textarea id="contributionClaim" rows="3" placeholder="What does the article currently claim to contribute?"></textarea></label>
+        <label><span class="field-label">Additional revision goals</span><textarea id="revisionGoals" rows="3" placeholder="State any specific weaknesses, sections or journal expectations to prioritise."></textarea></label>
+
+        <div class="revision-focus-panel">
+          <h3>Revision focus</h3>
+          <label class="check"><input type="checkbox" id="strengthenConceptualisation" checked> Strengthen conceptualisation and theoretical framing</label>
+          <label class="check"><input type="checkbox" id="strengthenContribution" checked> Clarify and defend the research contribution</label>
+          <label class="check"><input type="checkbox" id="assessMethodFit" checked> Assess method fit and reporting completeness</label>
+          <label class="check"><input type="checkbox" id="assessAnalysis" checked> Assess analysis suitability and recommend additional analysis where needed</label>
+          <label class="check"><input type="checkbox" id="deepenDiscussion" checked> Deepen the discussion and interpretation</label>
+          <label class="check"><input type="checkbox" id="strengthenRecommendations" checked> Strengthen implications and recommendations</label>
+        </div>
+
+        <h2>3. Reviewer comments, optional</h2>
+        <label><span class="field-label">Upload reviewer or editor comments</span><input id="commentsFile" type="file" accept=".docx,.pdf,.txt,.md,.rtf,.json"></label>
+        <button type="button" class="secondary compact-upload" id="extractCommentsBtn">Extract review comments</button>
+        <label><span class="field-label">Paste reviewer comments</span><textarea id="reviewComments" rows="8" placeholder="Paste reviewer, editor or supervisor comments. Keep numbering where available."></textarea></label>
+        <label class="check"><input type="checkbox" id="includeResponseMatrix" checked> Produce a response-to-reviewers matrix</label>
+
+        <h2>4. Literature support</h2>
+        <label class="check"><input type="checkbox" id="includeSourceSearch" checked> Search relevant scholarly metadata to strengthen framing and discussion</label>
+        <label><span class="field-label">Optional source search terms</span><textarea id="sourceSearchTerms" rows="2" placeholder="Use focused terms such as the central constructs, method and context"></textarea></label>
+        <label class="check"><input type="checkbox" id="includeOlderFoundational" checked> Include relevant foundational literature</label>
+
+        <div class="actions">
+          <button type="submit" id="reviseBtn">Revise and polish article</button>
+          <button type="button" class="secondary" id="clearBtn">Clear</button>
+        </div>
+        <p id="status" class="status"></p>
+      </form>
+
+      <section class="card output-stack revision-output-panel">
+        <div>
+          <div class="result-head">
+            <div><h2>Revised article</h2><p class="help">Review every factual, methodological and citation change before submission.</p></div>
+            <div class="output-actions"><button id="copyArticleBtn" disabled>Copy</button><button id="downloadRevisionBtn" disabled>Download DOCX with blue revisions</button></div>
+          </div>
+          <div id="revisionMeta" class="attached-summary">Revision details will appear here.</div>
+          <textarea id="revisedArticle" class="output-box revision-article-box" readonly placeholder="The revised article will appear here."></textarea>
+        </div>
+
+        <div class="revision-report-panel">
+          <div class="result-head"><div><h2>Revision and publishability report</h2><p class="help">Includes method-fit assessment, additional analysis recommendations and remaining author actions.</p></div><div class="output-actions"><button id="copyReportBtn" disabled>Copy report</button></div></div>
+          <textarea id="revisionReport" class="output-box revision-report-box" readonly placeholder="The revision report will appear here."></textarea>
+        </div>
+
+        <div id="reviewerMatrixPanel" class="revision-report-panel" hidden>
+          <div class="result-head"><div><h2>Response to reviewer comments</h2></div><div class="output-actions"><button id="copyMatrixBtn" disabled>Copy matrix</button></div></div>
+          <textarea id="reviewerMatrix" class="output-box revision-matrix-box" readonly></textarea>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="footer">ArticleReady AI, publication development with author verification.</footer>
+  <script src="/static/article_revision.js?v=20260628-revision"></script>
+</body>
+</html>
