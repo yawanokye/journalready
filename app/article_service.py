@@ -392,6 +392,63 @@ def _prose_objective_requirements(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _expert_professor_requirements(payload: dict[str, Any]) -> dict[str, Any]:
+    research_area = str(payload.get("research_area") or payload.get("article_title") or "the article's discipline").strip()
+    return {
+        "research_area": research_area,
+        "voice_standard": "senior professor and experienced journal editor in the exact field",
+        "rules": [
+            f"Write with the conceptual command, disciplinary judgement and methodological precision expected of a leading professor and journal editor in {research_area}.",
+            "Do not announce or claim a professorial identity in the manuscript. Demonstrate expertise through accurate conceptual distinctions, method fit, evidence use and restrained scholarly judgement.",
+            "Interrogate construct definitions, causal assumptions, identification, measurement validity, analytical alternatives and boundary conditions rather than accepting weak formulations at face value.",
+            "State the article's contribution as a precise advance over the cited literature, not as a broad claim of novelty or location alone.",
+            "Use field-appropriate terminology consistently and explain technical choices at the depth expected in a strong peer-reviewed journal.",
+        ],
+    }
+
+
+def _citation_density_requirements(payload: dict[str, Any]) -> dict[str, Any]:
+    article_type = str(payload.get("article_type") or "").lower()
+    if any(token in article_type for token in ["systematic", "scoping", "review", "meta-analysis", "meta analysis"]):
+        overall = {"minimum": 12, "target": 18}
+    elif any(token in article_type for token in ["short", "brief", "communication"]):
+        overall = {"minimum": 5, "target": 8}
+    else:
+        overall = {"minimum": 8, "target": 12}
+    return {
+        "citation_occurrences_per_1000_words": overall,
+        "section_guidance": {
+            "Introduction": "8-12 citation occurrences per 1,000 words, concentrated on factual context, problem evidence, gap and contribution claims.",
+            "Literature Review or Theoretical Background": "12-18 citation occurrences per 1,000 words, with synthesis across studies rather than one-author summaries.",
+            "Methods": "5-8 citation occurrences per 1,000 words for design, measurement, sampling, analytical and reporting choices that require authority.",
+            "Discussion": "8-12 citation occurrences per 1,000 words, positioned directly beside comparisons, mechanisms, contradictions and boundary-condition claims.",
+        },
+        "rules": [
+            "Place a verified citation in the same sentence as the claim it supports, or immediately after the supported clause. Do not leave several factual or theoretical claims under one distant citation.",
+            "Cite every substantive factual, theoretical, methodological and empirical claim that is not common knowledge or supplied as the study's own confirmed result.",
+            "Use multiple directly relevant sources when a claim represents a contested debate, broad evidence base or methodological standard.",
+            "Do not cite a source merely because a keyword matches. The title, abstract, method, context or reported finding must directly support the claim.",
+            "Do not fabricate references or pad the manuscript to hit a numerical target. When the verified evidence bank is insufficient, insert [Author action: Add a verified source that directly supports this claim.]",
+            "Keep citation density lower in pure results reporting, but cite method authorities in Methods and theory or prior evidence in Discussion.",
+        ],
+    }
+
+
+def _tense_and_action_requirements(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "tense_rule": "No future tense anywhere in the article or instrument package.",
+        "rules": [
+            "Do not use 'will', 'shall', 'is going to', 'are going to', 'will be' or equivalent future constructions in any section, table, note, checklist, declaration or instrument guidance.",
+            "Describe an independent Stage 1 study in present tense, for example: 'The study adopts...', 'Data collection uses...', 'The analysis applies...', and 'The questionnaire contains...'.",
+            "Describe completed work in past tense and confirmed findings in past or present tense as appropriate.",
+            "Do not disguise future tense as proposal language. Rewrite 'will be measured' as 'is measured', 'will be collected' as 'is collected', and 'will assess' as 'assesses'.",
+            "Every item that requires author attention, a decision, permission, verification, missing evidence, additional analysis or a later action must appear in one square-bracketed instruction beginning exactly with '[Author action:'.",
+            "Do not place advice, recommendations to the author, next-stage instructions, licensing checks, ethics actions, data-access requirements or unresolved methodological decisions in ordinary black prose.",
+            "Do not nest square brackets. Consolidate the full action into one bracketed instruction, for example [Author action: Confirm the accessible population, confidence level, margin of error and final sample size.].",
+        ],
+    }
+
+
 def _equation_and_framework_requirements(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "equation_rules": [
@@ -433,11 +490,14 @@ def _strong_humanisation_requirements(payload: dict[str, Any]) -> dict[str, Any]
 
 def _article_prompt_quality_pack(payload: dict[str, Any]) -> dict[str, Any]:
     return {
+        "expert_professor_requirements": _expert_professor_requirements(payload),
         "human_article_style_requirements": _human_article_style_requirements(payload),
         "strong_humanisation_requirements": _strong_humanisation_requirements(payload),
         "prose_objective_requirements": _prose_objective_requirements(payload),
         "survey_method_requirements": _survey_method_requirements(payload),
         "equation_and_framework_requirements": _equation_and_framework_requirements(payload),
+        "citation_density_requirements": _citation_density_requirements(payload),
+        "tense_and_action_requirements": _tense_and_action_requirements(payload),
         "reference_depth_requirements": _article_reference_expectations(str(payload.get("article_type") or "")),
     }
 
@@ -1168,6 +1228,435 @@ Data availability: [confirm data availability statement]
 [insert {citation_style} references for sources cited in the article only]{source_audit}
 """.strip()
 
+_ACTION_SECTION_RE = re.compile(
+    r"\b(?:methods? readiness checklist|author actions?|required actions?|remaining actions?|next stage(?: note)?|research resource guidance|validation actions?|instrument development and validation plan|data requirements?|analysis requirements?)\b",
+    flags=re.IGNORECASE,
+)
+
+_ACTION_VERBS = (
+    "confirm|verify|obtain|calculate|select|decide|provide|upload|insert|revise|report|check|seek|conduct|run|collect|complete|clarify|specify|include|add|replace|adapt|test|assess|determine|use|measure|retain|justify|administer|pilot|translate|document|classify|code|compare|estimate|disclose|cite|remove|address|resolve|avoid|ensure|comply|consider|preserve|explain|state|define|establish|describe|develop|align|integrate|interpret|merge|write|generate"
+)
+
+_ACTION_SENTENCE_RE = re.compile(
+    rf"(?:\b(?:the authors?|the research team|the study team|the user)\s+(?:should|must|needs?\s+to|is\s+required\s+to)\b|"
+    rf"\b(?:is|are)\s+(?:recommended|required|needed)\b|"
+    rf"\b(?:should|must)\s+be\s+(?:obtained|confirmed|verified|calculated|selected|provided|uploaded|inserted|revised|reported|checked|conducted|collected|completed|clarified|specified|included|added|replaced|adapted|tested|assessed|determined|used|measured|retained|justified|administered|piloted|translated|documented|classified|coded|compared|estimated|disclosed|cited|removed|addressed)\b|"
+    rf"\bsubject\s+to\s+(?:permission|approval|licensing|validation|verification)\b|"
+    rf"^(?:do\s+not\s+|(?:{_ACTION_VERBS})\b)|"
+    rf"^if\b[^.!?]{{0,180}}?,\s*(?:{_ACTION_VERBS})\b|"
+    rf"\[(?:author\s+action|insert|verify|confirm|provide|supply|complete|replace|check|add|update|obtain|state|specify|include|revise|review|conduct|perform|run|collect|clarify|report|resolve|address|identify|upload|attach|calculate|test|assess|determine|seek)\b)",
+    flags=re.IGNORECASE,
+)
+
+_FUTURE_BASE_VERBS = {
+    "adopt": "adopts", "analyse": "analyses", "analyze": "analyzes", "apply": "applies",
+    "assess": "assesses", "calculate": "calculates", "capture": "captures", "classify": "classifies",
+    "collect": "collects", "compare": "compares", "comply": "complies", "conduct": "conducts",
+    "consider": "considers", "contain": "contains", "control": "controls", "define": "defines",
+    "describe": "describes", "distinguish": "distinguishes", "document": "documents", "estimate": "estimates",
+    "evaluate": "evaluates", "examine": "examines", "exclude": "excludes", "focus": "focuses",
+    "handle": "handles", "include": "includes", "interpret": "interprets", "measure": "measures",
+    "model": "models", "obtain": "obtains", "present": "presents", "proceed": "proceeds",
+    "provide": "provides", "receive": "receives", "recruit": "recruits", "remove": "removes",
+    "report": "reports", "retain": "retains", "select": "selects", "specify": "specifies",
+    "test": "tests", "use": "uses", "verify": "verifies", "write": "writes",
+}
+
+_PLURAL_SUBJECT_WORDS = {
+    "we", "they", "you", "data", "results", "participants", "respondents", "graduates", "authors",
+    "researchers", "measures", "items", "indicators", "variables", "constructs", "responses", "records",
+    "sources", "controls", "coefficients", "effects", "analyses", "findings", "hypotheses", "models",
+    "messages", "criteria", "procedures", "dimensions", "relationships", "statistics", "estimates",
+}
+
+_SINGULAR_SUBJECT_WORDS = {
+    "study", "article", "analysis", "model", "questionnaire", "survey", "sample", "research", "framework",
+    "construct", "measure", "procedure", "design", "team", "approval", "consent", "psychological capital",
+    "career adaptability", "gig readiness", "effectiveness", "software", "instrument", "population",
+    "bias", "status", "process", "assessment", "screening", "bootstrapping", "analysis",
+}
+
+
+def _subject_is_plural(prefix: str) -> bool:
+    raw = re.sub(r"(?<=\d),(?=\d)", "", prefix.lower())
+    clean = re.sub(r"[^A-Za-z,;: ]+", " ", raw)
+    clean = re.sub(r"\s+", " ", clean).strip()
+    if not clean:
+        return False
+
+    # A coordinated noun list is plural, even when the final item is singular.
+    if clean.count(",") >= 1 and " and " in f" {clean} ":
+        return True
+
+    # Remove introductory adjuncts and work with the local grammatical subject.
+    clause = re.split(r"[;:]", clean)[-1].strip()
+    if "," in clause:
+        clause = clause.rsplit(",", 1)[-1].strip()
+    clause = re.sub(r"^(?:however|therefore|consequently|statistically|empirically|conceptually|methodologically)\s+", "", clause)
+    words = [word for word in clause.split() if word]
+    if not words:
+        return False
+
+    determiner_plural = words[0] in {"these", "those", "several", "multiple", "many", "both", "various"}
+    if determiner_plural:
+        return True
+    while words and words[0] in {"the", "a", "an", "this", "that", "each", "every"}:
+        words.pop(0)
+    if not words:
+        return False
+
+    # Keep only the noun head before a trailing prepositional or participial phrase.
+    stop_words = {"with", "of", "in", "for", "among", "across", "using", "based", "through", "within", "from"}
+    head: list[str] = []
+    for word in words:
+        if word in stop_words and head:
+            break
+        head.append(word)
+    head_text = " ".join(head[-5:])
+    if " and " in f" {head_text} ":
+        return True
+
+    last = head[-1] if head else words[-1]
+    # The grammatical head takes precedence over modifiers such as "data" in "data screening".
+    if last.endswith("ing") or last in _SINGULAR_SUBJECT_WORDS:
+        return False
+    if last in _PLURAL_SUBJECT_WORDS:
+        return True
+    if any(re.search(rf"\b{re.escape(item)}\b", head_text) for item in _SINGULAR_SUBJECT_WORDS):
+        return False
+    if any(re.search(rf"\b{re.escape(item)}\b", head_text) for item in _PLURAL_SUBJECT_WORDS):
+        return True
+    if last.endswith("s") and last not in {"analysis", "hypothesis", "effectiveness", "progress", "bias", "status", "process"}:
+        return True
+    return False
+
+
+def _third_person_present(verb: str) -> str:
+    lower = verb.lower()
+    if lower in _FUTURE_BASE_VERBS:
+        converted = _FUTURE_BASE_VERBS[lower]
+    elif lower == "be":
+        converted = "is"
+    elif lower == "have":
+        converted = "has"
+    elif re.search(r"[^aeiou]y$", lower):
+        converted = lower[:-1] + "ies"
+    elif re.search(r"(?:s|x|z|ch|sh|o)$", lower):
+        converted = lower + "es"
+    else:
+        converted = lower + "s"
+    return converted[:1].upper() + converted[1:] if verb[:1].isupper() else converted
+
+
+def _convert_future_tense_sentence(sentence: str) -> str:
+    """Convert common academic future constructions to present tense without changing evidence."""
+    value = sentence
+
+    first_future = re.search(r"\b(?:will|shall)\b", value, flags=re.IGNORECASE)
+    coordinated_plural = _subject_is_plural(value[: first_future.start()]) if first_future else False
+
+    def coordinated(match: re.Match[str]) -> str:
+        conjunction = match.group("conjunction")
+        negation = bool(match.group("not"))
+        verb = match.group("verb")
+        if verb.lower() == "be":
+            present = "are" if coordinated_plural else "is"
+        elif verb.lower() == "have":
+            present = "have" if coordinated_plural else "has"
+        else:
+            present = verb.lower() if coordinated_plural else _third_person_present(verb)
+        if negation:
+            auxiliary = "do not" if coordinated_plural else "does not"
+            present = verb.lower()
+            return f"{conjunction} {auxiliary} {present}"
+        return f"{conjunction} {present}"
+
+    value = re.sub(
+        r"\b(?P<conjunction>and|but)\s+(?:will|shall)\s+(?P<not>not\s+)?(?P<verb>[A-Za-z]+)",
+        coordinated,
+        value,
+        flags=re.IGNORECASE,
+    )
+
+    # Passive and copular constructions.
+    def passive(match: re.Match[str]) -> str:
+        prefix = match.group("prefix")
+        auxiliary = "are" if _subject_is_plural(prefix) else "is"
+        return f"{prefix}{auxiliary} "
+
+    value = re.sub(
+        r"(?P<prefix>(?:^|(?<=[.!?]\s))[^.!?]{0,140}?)\b(?:will|shall)\s+be\s+",
+        passive,
+        value,
+        flags=re.IGNORECASE,
+    )
+
+    # Active constructions.
+    def active(match: re.Match[str]) -> str:
+        prefix = match.group("prefix")
+        negation = bool(match.group("not"))
+        verb = match.group("verb")
+        plural = _subject_is_plural(prefix)
+        if verb.lower() == "have":
+            present = "have" if plural else "has"
+        elif verb.lower() == "be":
+            present = "are" if plural else "is"
+        else:
+            present = verb.lower() if plural else _third_person_present(verb)
+        if negation:
+            auxiliary = "do not" if plural else "does not"
+            present = verb.lower()
+            return f"{prefix}{auxiliary} {present}"
+        return f"{prefix}{present}"
+
+    value = re.sub(
+        r"(?P<prefix>(?:^|(?<=[.!?]\s))[^.!?]{0,140}?)\b(?:will|shall)\s+(?P<not>not\s+)?(?P<verb>[A-Za-z]+)",
+        active,
+        value,
+        flags=re.IGNORECASE,
+    )
+
+    # Going-to future.
+    def going_to(match: re.Match[str]) -> str:
+        prefix = match.group("prefix")
+        verb = match.group("verb")
+        plural = _subject_is_plural(prefix)
+        present = verb.lower() if plural else _third_person_present(verb)
+        return f"{prefix}{present}"
+
+    value = re.sub(
+        r"(?P<prefix>(?:^|(?<=[.!?]\s))[^.!?]{0,140}?)\b(?:is|are)\s+going\s+to\s+(?P<verb>[A-Za-z]+)",
+        going_to,
+        value,
+        flags=re.IGNORECASE,
+    )
+    return value
+
+
+def _normalise_action_text(text: str) -> str:
+    value = str(text or "").strip()
+    # Flatten existing or nested action brackets into one clean instruction.
+    value = re.sub(r"\[\s*(?:Author action\s*:\s*)?", "", value, flags=re.IGNORECASE)
+    value = value.replace("]", " ")
+    value = re.sub(r"\s+", " ", value).strip()
+    if re.match(r"^insert\s+", value, flags=re.IGNORECASE):
+        value = re.sub(r"^insert\s+", "Insert ", value, count=1, flags=re.IGNORECASE)
+    else:
+        value = re.sub(r"\binsert\s+", "the confirmed ", value, flags=re.IGNORECASE)
+    value = _convert_future_tense_sentence(value)
+    value = re.sub(r"^(?:Action required|Required action|Attention required|User action)\s*:\s*", "", value, flags=re.IGNORECASE)
+
+    negative_actor = re.match(
+        r"^(?:The authors?|The research team|The study team|The user|The study|This study)\s+(?:should|must)\s+not\s+(?P<rest>.+)$",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if negative_actor:
+        value = "Do not " + negative_actor.group("rest")
+    else:
+        value = re.sub(
+            r"^(?:The authors?|The research team|The study team|The user|The study|This study)\s+(?:should|must|needs?\s+to|is\s+required\s+to)\s+",
+            "",
+            value,
+            flags=re.IGNORECASE,
+        )
+    value = value[:1].upper() + value[1:] if value else value
+    value = value.rstrip()
+    if value and value[-1] not in ".!?":
+        value += "."
+    return f"[Author action: {value}]"
+
+
+def _sentence_requires_action(sentence: str) -> bool:
+    value = sentence.strip()
+    if not value or value.startswith("[") and value.lower().startswith("[author action:"):
+        return False
+    if re.match(r"^(?:H\d+[a-z]?|RQ\d+|P\d+)\s*:", value, flags=re.IGNORECASE):
+        return False
+    return bool(_ACTION_SENTENCE_RE.search(value))
+
+
+def _process_action_paragraph(text: str, force_action: bool = False, method_context: bool = False) -> str:
+    value = _convert_future_tense_sentence(text)
+    if force_action:
+        return _normalise_action_text(value)
+
+    protected_actions: dict[str, str] = {}
+
+    def protect(match: re.Match[str]) -> str:
+        token = match.group(0)
+        if not _ATTENTION_RE.fullmatch(token) and not token.lower().startswith("[author action:"):
+            return token
+        key = f"<AR_ACTION_{len(protected_actions)}>"
+        protected_actions[key] = token
+        return key
+
+    value = re.sub(r"\[[^\]\n]+\]", protect, value)
+    sentences = _split_sentences_safe(value)
+    if not sentences:
+        result = value
+    else:
+        processed: list[str] = []
+        for sentence in sentences:
+            keys_in_sentence = [key for key in protected_actions if key in sentence]
+            restored_sentence = sentence
+            for key in keys_in_sentence:
+                restored_sentence = restored_sentence.replace(key, protected_actions[key])
+            method_advice = bool(
+                method_context
+                and re.search(
+                    r"\b(?:should|must|needs?\s+to|need\s+to|is\s+required|are\s+required|is\s+recommended|are\s+recommended|subject\s+to\s+(?:permission|approval|licensing|validation|verification)|may\s+be\s+considered|could\s+be\s+considered)\b",
+                    restored_sentence,
+                    flags=re.IGNORECASE,
+                )
+            )
+            if keys_in_sentence or _sentence_requires_action(restored_sentence) or method_advice:
+                processed.append(_normalise_action_text(restored_sentence))
+            else:
+                processed.append(restored_sentence)
+        result = " ".join(processed)
+    return result
+
+
+def _process_action_table_line(
+    line: str,
+    force_action: bool,
+    action_columns: set[int] | None = None,
+    method_context: bool = False,
+) -> str:
+    cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+    if not cells or all(re.fullmatch(r":?-{3,}:?", cell.replace(" ", "")) for cell in cells):
+        return line
+    action_columns = set(action_columns or set())
+    for index, cell in enumerate(cells):
+        if not cell:
+            continue
+        if force_action and index > 0:
+            cells[index] = _normalise_action_text(cell)
+        elif index in action_columns:
+            cells[index] = _normalise_action_text(cell)
+        else:
+            cells[index] = _process_action_paragraph(cell, method_context=method_context)
+    return "| " + " | ".join(cells) + " |"
+
+
+def _enforce_article_writer_output_rules(text: str) -> str:
+    """Enforce present/past tense and red-ready bracketed author actions after generation."""
+    if not text:
+        return text
+    lines = text.splitlines()
+    output: list[str] = []
+    in_code = False
+    in_equation = False
+    in_references = False
+    action_section = False
+    method_context = False
+    in_table = False
+    table_action_columns: set[int] = set()
+
+    for raw_line in lines:
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_code = not in_code
+            output.append(line)
+            continue
+        if stripped == "$$":
+            in_equation = not in_equation
+            output.append(line)
+            continue
+        if in_code or in_equation:
+            output.append(line)
+            continue
+        if re.match(r"^#{1,6}\s+", stripped):
+            heading = re.sub(r"^#{1,6}\s+", "", stripped)
+            in_references = bool(re.match(r"^(?:references|source use audit)\b", heading, flags=re.IGNORECASE))
+            action_section = bool(_ACTION_SECTION_RE.search(heading)) and not in_references
+            method_context = bool(
+                re.search(
+                    r"\b(?:methods?|methodology|research design|study context|population|sampling|eligibility|measures?|measurement|questionnaire|instrument|pre-testing|data collection|common method|response bias|data preparation|analytical strategy|analysis strategy|moderation testing|robustness checks?|subgroup analysis|ethics)\b",
+                    heading,
+                    flags=re.IGNORECASE,
+                )
+            ) and not in_references
+            in_table = False
+            table_action_columns = set()
+            output.append(line)
+            continue
+        if in_references:
+            line = re.sub(
+                r"\[[^\]\n]+\]",
+                lambda m: _normalise_action_text(m.group(0)) if (_ATTENTION_RE.fullmatch(m.group(0)) or m.group(0).lower().startswith("[author action:")) else m.group(0),
+                line,
+            )
+            output.append(line)
+            continue
+        if not stripped:
+            in_table = False
+            table_action_columns = set()
+            output.append(line)
+            continue
+        if stripped.startswith("|") and stripped.endswith("|"):
+            cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+            is_separator = bool(cells) and all(re.fullmatch(r":?-{3,}:?", cell.replace(" ", "")) for cell in cells)
+            if not in_table and not is_separator:
+                in_table = True
+                table_action_columns = {
+                    index
+                    for index, cell in enumerate(cells)
+                    if re.search(r"\b(?:action|required|attention|guidance|adaptation|permission|check|readiness|author input|information needed|decision\s+(?:needed|required)|(?:needed|required)\s+decision)\b", cell, flags=re.IGNORECASE)
+                }
+                output.append(line)
+            elif is_separator:
+                output.append(line)
+            else:
+                output.append(
+                    _process_action_table_line(
+                        line,
+                        action_section,
+                        action_columns=table_action_columns,
+                        method_context=method_context,
+                    )
+                )
+            continue
+        in_table = False
+        table_action_columns = set()
+        list_match = re.match(r"^(?P<prefix>\s*(?:[-*•]|\d+[.)])\s+)(?P<body>.+)$", line)
+        if list_match:
+            body = _process_action_paragraph(
+                list_match.group("body"),
+                force_action=action_section,
+                method_context=method_context,
+            )
+            output.append(list_match.group("prefix") + body)
+            continue
+        output.append(_process_action_paragraph(line, force_action=action_section, method_context=method_context))
+
+    result = "\n".join(output)
+    reference_match = re.search(r"(?im)^#{1,6}\s+(references|source use audit)\b", result)
+    body = result[:reference_match.start()] if reference_match else result
+    tail = result[reference_match.start():] if reference_match else ""
+    body = re.sub(r"\b(?:will|shall)\s+be\b", "is", body, flags=re.IGNORECASE)
+    body = re.sub(r"\b(?:will|shall)\s+have\b", "has", body, flags=re.IGNORECASE)
+    body = re.sub(r"\b(?:will|shall)\s+(?P<verb>[A-Za-z]+)", lambda m: m.group("verb"), body, flags=re.IGNORECASE)
+    body = re.sub(r"[ \t]{2,}", " ", body)
+    body = re.sub(r"\n +", "\n", body)
+    return (body.rstrip() + ("\n\n" + tail.lstrip() if tail else "")).strip()
+
+
+def _citation_density_report(text: str) -> dict[str, Any]:
+    body = text or ""
+    reference_match = re.search(r"(?im)^#{1,6}\s+(references|source use audit)\b", body)
+    if reference_match:
+        body = body[:reference_match.start()]
+    words = len(re.findall(r"\b[\w’'-]+\b", re.sub(r"```.*?```", " ", body, flags=re.DOTALL)))
+    parenthetical = re.findall(r"\([^)]*\b(?:19|20)\d{2}[a-z]?\b[^)]*\)", body)
+    narrative = re.findall(r"\b[A-Z][A-Za-z'’-]+(?:\s+(?:and|&|et\s+al\.)\s+[A-Z][A-Za-z'’-]+)?\s+\((?:19|20)\d{2}[a-z]?\)", body)
+    count = len(parenthetical) + len(narrative)
+    density = round((count * 1000 / words), 2) if words else 0.0
+    return {"word_count": words, "citation_occurrences": count, "citation_occurrences_per_1000_words": density}
+
+
 def _finalise_article_text(text: str) -> str:
     text = _strip_code_fences(text or "")
     text = re.sub(r"<span\s+[^>]*>(.*?)</span>", r"\1", text, flags=re.I | re.S)
@@ -1278,6 +1767,10 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
                 "Candidate data sources and instruments are possibilities only. Explain variable coverage, population fit, period, access, ethics, licensing and validation checks before recommending adoption.",
                 "Do not reproduce proprietary questionnaire items. When a scale may be copyrighted, identify the source and state that permission or licensing must be checked.",
                 "If include_instrument_draft is true, draft a separate original provisional questionnaire, interview guide or measurement plan aligned with the objectives. Do not present it as validated until it has been tested.",
+                "Write with the conceptual authority, disciplinary command and methodological judgement expected of a leading professor and experienced journal editor in the stated research area, without announcing that role in the manuscript.",
+                "Never use future tense anywhere in the article or instrument package. Use present tense for a proposed Stage 1 design and past tense for completed work.",
+                "Every author decision, missing detail, permission check, ethics requirement, additional analysis, next-stage instruction or unresolved issue must appear as one square-bracketed instruction beginning '[Author action:'. No advice may remain in ordinary prose.",
+                "Cite substantive claims densely and locally. Place verified citations in the same sentence as the factual, theoretical, methodological or empirical claim they support, while avoiding citation padding and irrelevant sources.",
                 "Write in polished formal British English, minimise long dashes, use prose-led objectives and maintain a focused article contribution.",
                 "Apply the strong_humanisation_requirements in the quality pack: use controlled high burstiness, varied paragraph shape, precise lexical variation and natural transitions while preserving all evidence, citations, tables, equations and placeholders.",
                 "Do not randomise paragraph order, inject tangents, introduce deliberate mistakes, or mention AI detection or humanisation in the article.",
@@ -1295,7 +1788,11 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
             response = client.responses.create(
                 model=model,
                 instructions=(
-                    "You are ArticleReady AI's staged journal article development assistant. Respect the selected stage. "
+                    "You are ArticleReady AI's senior disciplinary professor and journal editor for the user's exact research field. Respect the selected stage. "
+                    "Write with expert conceptual judgement, rigorous method fit and publication-level analytical precision without claiming a professorial identity in the manuscript. "
+                    "Use no future tense. Stage 1 methods use present tense, and completed work uses past tense. "
+                    "Place every unresolved author action, permission check, missing evidence item, additional-analysis need or next-stage instruction inside one [Author action: ...] bracket. "
+                    "Attach verified citations closely to substantive claims and never pad the text with weak or irrelevant sources. "
                     "Apply the supplied strong human-supervised academic writing layer: use natural sentence-length variation, varied paragraph openings, "
                     "precise disciplinary language and evidence-led reasoning while preserving citations, technical terms, tables, equations and placeholders. "
                     "Do not add deliberate errors, unrelated tangents, or commentary about AI detection or humanisation. "
@@ -1332,6 +1829,10 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
         )
         article_text = _finalise_article_text(article_text)
 
+    article_text = _enforce_article_writer_output_rules(article_text)
+    instrument_text = _enforce_article_writer_output_rules(instrument_text) if instrument_text else ""
+    citation_density = _citation_density_report(article_text)
+
     return {
         "article_text": article_text,
         "instrument_text": instrument_text,
@@ -1350,6 +1851,10 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
         "excluded_retracted_titles": [str(s.get("title") or "Untitled") for s in blocked[:10]],
         "provider_errors": provider_errors,
         "reference_depth_guidance": _article_reference_expectations(str(payload.get("article_type") or "")),
+        "citation_density_report": citation_density,
+        "expert_professor_standard_applied": True,
+        "future_tense_guard_applied": True,
+        "author_action_bracketing_applied": True,
         "strong_humanisation_applied": mode == "ai_draft" and _strong_humanisation_enabled(),
         "humanisation_strength": _humanisation_strength(),
         "quality_filters": [
@@ -1359,6 +1864,10 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
             "Candidate secondary datasets and instruments must be checked for fit, access, permission and validity.",
             "Retracted, withdrawn, removed and expression-of-concern records are excluded where detectable.",
             "Attached scholarly records are filtered through a relevance gate and cannot replace the user's study evidence.",
+            "The article is written with the conceptual and methodological judgement expected of a senior professor and experienced journal editor in the field.",
+            "Future-tense constructions are converted to present or past tense before the article is returned.",
+            "Author advice, missing information and required actions are consolidated into [Author action: ...] brackets for red DOCX formatting.",
+            "Verified citations are placed close to the substantive claims they support, subject to source relevance and integrity checks.",
             "Missing article details are rendered as bracketed attention placeholders.",
         ],
     }
