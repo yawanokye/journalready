@@ -275,7 +275,12 @@ async function draft(event) {
     if (body.research_resources) renderResearchResources(body.research_resources);
     renderDraftSources(body);
     const warnings = (body.provider_errors || []).length;
-    $("status").textContent = `${body.draft_stage === "initial_to_methods" ? "Stage 1 draft completed through Methods" : body.draft_stage === "continuation_after_results" ? "Stage 2 article completion finished" : "Full article draft completed"} using ${body.model_used || "the configured workflow"}. ${warnings ? `Review ${warnings} warning(s).` : "Review all placeholders, resources, citations and evidence."}`;
+    const completionMessage = body.draft_stage === "initial_to_methods"
+      ? "Stage 1 completed. The article draft is prepared through the Methods section."
+      : body.draft_stage === "continuation_after_results"
+        ? "Stage 2 completed. The full article draft is ready."
+        : "Article draft completed.";
+    $("status").textContent = `${completionMessage} ${warnings ? `Review ${warnings} warning(s).` : "Review all red author-action items, citations and evidence."}`;
     $("copyBtn").disabled = !lastText; $("downloadBtn").disabled = !lastText;
   } catch (error) { $("status").textContent = `Error: ${error.message}`; }
   finally { $("draftBtn").disabled = false; }
