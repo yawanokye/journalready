@@ -33,7 +33,7 @@ class ArticleIdeaRequest(BaseModel):
     variables_or_themes: str = ""
     preferred_contribution: str = ""
     keywords: str = ""
-    max_ideas: int = 6
+    max_ideas: int = 10
     resource_result_limit: int = 6
     include_source_search: bool = True
     include_older_foundational: bool = True
@@ -42,7 +42,7 @@ class ArticleIdeaRequest(BaseModel):
     @field_validator("max_ideas")
     @classmethod
     def validate_max_ideas(cls, value: int) -> int:
-        return max(3, min(int(value), 10))
+        return max(3, min(int(value), 20))
 
     @field_validator("resource_result_limit")
     @classmethod
@@ -126,6 +126,9 @@ class JournalArticleRequest(BaseModel):
     instrument_requirements: str = ""
     include_instrument_draft: bool = False
     word_limit: str = "6000-8000"
+    target_word_count: int | None = None
+    article_structure: str = ""
+    long_write_mode: str = "auto"
     citation_style: str = "APA 7th"
     include_source_search: bool = True
     include_older_foundational: bool = True
@@ -145,6 +148,19 @@ class JournalArticleRequest(BaseModel):
     def validate_stage(cls, value: str) -> str:
         allowed = {"full_article", "initial_to_methods", "continuation_after_results"}
         return value if value in allowed else "full_article"
+
+    @field_validator("target_word_count")
+    @classmethod
+    def validate_target_word_count(cls, value: int | None) -> int | None:
+        if value is None:
+            return None
+        return max(1200, min(int(value), 30000))
+
+    @field_validator("long_write_mode")
+    @classmethod
+    def validate_long_write_mode(cls, value: str) -> str:
+        allowed = {"auto", "single_pass", "batch"}
+        return value if value in allowed else "auto"
 
 
 class ArticleExportRequest(BaseModel):

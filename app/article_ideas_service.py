@@ -642,7 +642,131 @@ def _fallback_ideas(payload: dict[str, Any]) -> list[dict[str, Any]]:
         },
     ])
 
-    max_ideas = max(3, min(int(payload.get("max_ideas") or 6), 10))
+
+    templates.extend([
+        {
+            "title": f"Theoretical Reframing of {area.title()}: A Conceptual Extension",
+            "angle": "A conceptual article that clarifies the theory, constructs and boundary assumptions behind the focal phenomenon.",
+            "gap": "The article is viable when the literature shows conceptual ambiguity, competing explanations or weak theoretical integration.",
+            "objective": f"To develop a clearer conceptual explanation of {area} and specify propositions for future empirical testing.",
+            "questions_or_hypotheses": ["Which theoretical assumptions require clarification or extension?"],
+            "contribution": "Improves conceptual precision and provides a testable proposition set.",
+            "method_and_data_route": "Use conceptual analysis, theory synthesis and illustrative evidence. Do not report empirical findings unless evidence is supplied.",
+            "research_route": "review_or_conceptual",
+        },
+        {
+            "title": f"Replication and Extension of Evidence on {area.title()} in {context or 'a New Context'}",
+            "angle": "A replication-and-extension article that tests whether an established finding holds in a new context, period or population.",
+            "gap": "The paper must identify a specific prior finding to replicate and explain the justified extension.",
+            "objective": f"To replicate and extend established evidence on {area}{' in ' + context if context else ''}.",
+            "questions_or_hypotheses": ["Does the established relationship hold under the new conditions?"],
+            "contribution": "Adds cumulative evidence and clarifies contextual transferability.",
+            "method_and_data_route": "Use comparable measures, transparent deviations from the original design and robustness checks.",
+        },
+        {
+            "title": f"Robustness and Sensitivity of Findings on {area.title()}",
+            "angle": "A robustness-focused article examining whether the central conclusion depends on model, measure or sample choices.",
+            "gap": "The route is useful when prior evidence is sensitive to specification, sample, period or operationalisation decisions.",
+            "objective": f"To assess the robustness of conclusions about {area} across alternative specifications or evidence choices.",
+            "questions_or_hypotheses": ["Which modelling or measurement decisions materially affect the conclusion?"],
+            "contribution": "Improves confidence in the evidence base by identifying stable and fragile conclusions.",
+            "method_and_data_route": "Use alternative specifications, sensitivity tests, diagnostics and transparent reporting.",
+        },
+        {
+            "title": f"Mechanisms Linking {area.title()} to Practical Outcomes",
+            "angle": "A mechanism article that explains why the focal phenomenon produces a particular organisational, social, economic or policy outcome.",
+            "gap": "The mechanism must be measured or evidenced rather than inferred from association alone.",
+            "objective": f"To explain the mechanism through which {area} shapes the selected outcome.",
+            "questions_or_hypotheses": ["Which mechanism accounts for the observed relationship?"],
+            "contribution": "Moves the article beyond association by clarifying process and explanation.",
+            "method_and_data_route": "Use mediation, process evidence, qualitative explanation or mixed evidence only when the design supports it.",
+        },
+        {
+            "title": f"Institutional Conditions and {area.title()}",
+            "angle": "A contextual article examining how rules, institutions, governance arrangements or market structures shape the focal phenomenon.",
+            "gap": "Context must be theorised through institutions or mechanisms rather than presented as location alone.",
+            "objective": f"To examine how institutional conditions shape {area}{' in ' + context if context else ''}.",
+            "questions_or_hypotheses": ["Which institutional conditions strengthen, weaken or redirect the focal pattern?"],
+            "contribution": "Adds contextual and institutional explanation.",
+            "method_and_data_route": "Use contextual variables, policy documents, institutional indicators, comparative cases or qualitative evidence.",
+        },
+        {
+            "title": f"Predictive Modelling of {area.title()}",
+            "angle": "A prediction-oriented article focused on forecasting, classification or out-of-sample usefulness.",
+            "gap": "The article is suitable when practical users need prediction and the evidence permits validation beyond in-sample fit.",
+            "objective": f"To assess whether {area} can be predicted with acceptable accuracy using theoretically and practically relevant indicators.",
+            "questions_or_hypotheses": ["Which indicators improve prediction and out-of-sample usefulness?"],
+            "contribution": "Adds practical predictive value while separating prediction from causal explanation.",
+            "method_and_data_route": "Use train-test validation, cross-validation, benchmark models and transparent performance metrics.",
+        },
+        {
+            "title": f"Evidence Gaps in {area.title()}: A Structured Mapping Review",
+            "angle": "A mapping review that classifies what is known, where evidence is concentrated and where gaps remain.",
+            "gap": "This idea works when the literature is broad enough to map but not mature enough for a conclusive synthesis.",
+            "objective": f"To map the scope, methods, contexts and unresolved gaps in research on {area}.",
+            "questions_or_hypotheses": ["What does the evidence base cover, and what does it neglect?"],
+            "contribution": "Provides a structured agenda for future research and evidence development.",
+            "method_and_data_route": "Use transparent search strings, eligibility criteria, coding and synthesis tables.",
+            "research_route": "review_or_conceptual",
+        },
+        {
+            "title": f"Sectoral Differences in {area.title()}",
+            "angle": "A sector-focused article comparing theoretically meaningful industries, institutions or user groups.",
+            "gap": "Average effects may conceal sector-specific mechanisms or constraints.",
+            "objective": f"To examine whether {area} differs across relevant sectors or organisational settings.",
+            "questions_or_hypotheses": ["Which sectoral conditions explain observed differences?"],
+            "contribution": "Shows where the focal explanation travels and where it requires adaptation.",
+            "method_and_data_route": "Use sector-coded data, multigroup analysis, stratified estimates or comparative case evidence.",
+        },
+        {
+            "title": f"A Mixed-Methods Explanation of {area.title()}",
+            "angle": "A mixed-methods article using qualitative evidence to explain quantitative patterns or quantitative evidence to test qualitative insights.",
+            "gap": "This route is justified when one evidence type alone leaves the explanation incomplete.",
+            "objective": f"To provide an integrated mixed-methods explanation of {area}.",
+            "questions_or_hypotheses": ["How do quantitative patterns and qualitative explanations converge or diverge?"],
+            "contribution": "Combines breadth and depth to strengthen explanation.",
+            "method_and_data_route": "Use a clear convergent, explanatory sequential or exploratory sequential design with integration points.",
+            "research_route": "mixed_methods",
+        },
+        {
+            "title": f"Policy Evaluation Perspectives on {area.title()}",
+            "angle": "A policy evaluation article focused on whether an intervention, regulation or programme changed outcomes or implementation behaviour.",
+            "gap": "The paper needs a clear policy event, credible comparison and evidence of implementation context.",
+            "objective": f"To evaluate the policy or programme relevance of {area}{' in ' + context if context else ''}.",
+            "questions_or_hypotheses": ["What changed after the policy or programme, and for whom?"],
+            "contribution": "Links research evidence to policy effectiveness and implementation learning.",
+            "method_and_data_route": "Use pre-post, difference-in-differences, interrupted time series, process evaluation or documentary evidence where appropriate.",
+        },
+        {
+            "title": f"Risk, Uncertainty and {area.title()}",
+            "angle": "An uncertainty-focused article examining volatility, perceived risk, resilience or adaptive behaviour.",
+            "gap": "The topic is useful where existing studies focus on average relationships but under-explain uncertainty and risk exposure.",
+            "objective": f"To examine the role of risk and uncertainty in shaping {area}.",
+            "questions_or_hypotheses": ["How does uncertainty alter the focal relationship or outcome?"],
+            "contribution": "Adds risk-sensitive interpretation and practical decision relevance.",
+            "method_and_data_route": "Use volatility measures, scenario analysis, uncertainty indicators, perception scales or qualitative risk accounts as appropriate.",
+        },
+        {
+            "title": f"Digital Transformation and {area.title()}",
+            "angle": "A digital-transformation article examining how technology, data systems, automation or platforms reshape the focal phenomenon.",
+            "gap": "The paper must connect digital change to a specific mechanism, not simply add technology as a buzzword.",
+            "objective": f"To examine how digital transformation shapes {area} and its practical implications.",
+            "questions_or_hypotheses": ["Which digital mechanisms alter the focal process or outcome?"],
+            "contribution": "Explains technology-enabled change with a focused article-level argument.",
+            "method_and_data_route": "Use digital adoption measures, platform data, survey evidence, interviews, case evidence or secondary indicators.",
+        },
+        {
+            "title": f"Sustainability Implications of {area.title()}",
+            "angle": "A sustainability article linking the focal phenomenon to environmental, social, governance or long-term resilience outcomes.",
+            "gap": "This route needs a defensible sustainability mechanism and appropriate indicators rather than generic ESG language.",
+            "objective": f"To assess the sustainability implications of {area}.",
+            "questions_or_hypotheses": ["Which sustainability outcomes or constraints are most directly connected to the focal issue?"],
+            "contribution": "Connects the focal evidence to sustainability debates with clear boundaries.",
+            "method_and_data_route": "Use ESG indicators, policy documents, organisational evidence, stakeholder data or sustainability outcome measures.",
+        },
+    ])
+
+    max_ideas = max(3, min(int(payload.get("max_ideas") or 10), 20))
     output: list[dict[str, Any]] = []
     for index, item in enumerate(templates[:max_ideas], start=1):
         route = str(item.get("research_route") or infer_research_route(payload, str(item.get("method_and_data_route") or "")))
@@ -686,7 +810,7 @@ def _normalise_ideas(parsed: dict[str, Any], payload: dict[str, Any]) -> list[di
     raw_ideas = parsed.get("ideas") if isinstance(parsed, dict) else None
     if not isinstance(raw_ideas, list):
         return []
-    max_ideas = max(3, min(int(payload.get("max_ideas") or 6), 10))
+    max_ideas = max(3, min(int(payload.get("max_ideas") or 10), 20))
     ideas: list[dict[str, Any]] = []
     for index, raw in enumerate(raw_ideas[:max_ideas], start=1):
         if not isinstance(raw, dict):
@@ -774,6 +898,7 @@ def generate_article_ideas(payload: dict[str, Any]) -> dict[str, Any]:
             "inputs": payload,
             "source_records": source_records,
             "article_design_rules": source_mode_rules + [
+                "Generate the requested number of ideas up to max_ideas. If max_ideas is 20, return 20 clearly distinct article ideas unless the supplied material cannot support that many without overlap.",
                 "Each idea must have one central question or contribution and a feasible evidence route.",
                 "Use one clear overall objective and no more than three tightly aligned questions or hypotheses unless the article type requires otherwise.",
                 "Do not create novelty merely by adding a country name. State the theoretical, empirical, methodological, policy or contextual contribution.",

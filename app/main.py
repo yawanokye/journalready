@@ -18,7 +18,7 @@ STATIC_DIR = BASE_DIR / "static"
 app = FastAPI(
     title="ArticleReady AI",
     description="Journal article ideation, staged drafting, research-resource guidance, instrument planning, polishing and revision assistant.",
-    version="1.4.0",
+    version="1.4.2",
 )
 
 app.add_middleware(
@@ -61,6 +61,11 @@ def article_revision_page() -> FileResponse:
 @app.get("/revise-article")
 def article_revision_alias() -> FileResponse:
     return FileResponse(STATIC_DIR / "article_revision.html")
+
+
+@app.get("/pricing")
+def pricing_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "pricing.html")
 
 
 @app.get("/health")
