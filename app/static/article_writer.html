@@ -4,12 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Article Writer | ArticleReady AI</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20260628-revision">
+  <link rel="stylesheet" href="/static/styles.css?v=20260710-pricing">
 </head>
 <body>
   <header class="topbar">
     <a class="brand" href="/"><span class="brand-mark">AR</span><span>ArticleReady AI</span></a>
-    <nav class="nav"><a href="/">Home</a><a href="/topic-ideas">Article Topic Ideas</a><a href="/article-writer" aria-current="page">Article Writer</a><a href="/article-revision">Article Revision</a></nav>
+    <nav class="nav"><a href="/">Home</a><a href="/topic-ideas">Article Topic Ideas</a><a href="/article-writer" aria-current="page">Article Writer</a><a href="/article-revision">Article Revision</a><a href="/pricing">Pricing</a></nav>
   </header>
   <main class="shell">
     <section class="hero">
@@ -75,7 +75,19 @@
           <label><span class="field-label">Article type</span><select id="articleType"><option>Empirical research article</option><option>Systematic review</option><option>Scoping review</option><option>Conceptual article</option><option>Methodological article</option><option>Case study article</option><option>Policy or practice article</option><option>Short communication</option></select></label>
           <label><span class="field-label">Research depth</span><select id="academicLevel"><option>Bachelors</option><option>Non-Research Masters</option><option selected>Research Masters (e.g. MPhil)</option><option>Professional Doctorate (DBA, DEd)</option><option>PhD</option></select></label>
         </div>
-        <div class="two-cols"><label><span class="field-label">Target word limit</span><input id="wordLimit" value="6000-8000"></label><label><span class="field-label">Citation style</span><select id="citationStyle"><option>APA 7th</option><option>Harvard</option><option>Chicago Author-Date</option><option>Vancouver</option><option>IEEE</option><option>AMA</option><option>Journal-specific style</option></select></label></div>
+        <div class="two-cols"><label><span class="field-label">Target word limit</span><input id="wordLimit" value="7000-9000" placeholder="e.g. 7000-9000"></label><label><span class="field-label">Citation style</span><select id="citationStyle"><option>APA 7th</option><option>Harvard</option><option>Chicago Author-Date</option><option>Vancouver</option><option>IEEE</option><option>AMA</option><option>Journal-specific style</option></select></label></div>
+        <div class="long-write-panel">
+          <div class="source-panel-head"><div><h3>Length and structure control</h3><p class="help">Use this for full journal articles, long articles, review papers or journal-specific structures. Batch mode develops the article section by section when the manuscript is long.</p></div><span class="source-count-badge" id="tokenEstimateBadge">Token estimate</span></div>
+          <div class="two-cols"><label><span class="field-label">Target total words</span><input id="targetWordCount" type="number" min="1200" max="30000" step="100" value="8000"></label><label><span class="field-label">Long writing mode</span><select id="longWriteMode"><option value="auto" selected>Auto, use batch for long articles</option><option value="batch">Batch, section-by-section</option><option value="single_pass">Single pass</option></select></label></div>
+          <label><span class="field-label">Preferred article structure and section targets</span><textarea id="articleStructure" rows="6" placeholder="Optional. One section per line, for example:
+Introduction 1200
+Literature review and hypotheses 1800
+Methods 1300
+Results 1400
+Discussion 1700
+Conclusion 600"></textarea></label>
+          <p id="lengthPlanSummary" class="attached-summary">Default length plan: 7,000-9,000 words. Batch drafting is used automatically when the article is long.</p>
+        </div>
         <label><span class="field-label">Target journal or publisher</span><input id="targetJournal" placeholder="Optional, but recommended"></label>
         <label><span class="field-label">Journal aims, scope, and author guidelines</span><textarea id="authorGuidelines" rows="5" placeholder="Paste article structure, abstract format, word limit, tables and figures rules, reference requirements, and relevant scope notes."></textarea></label>
         <label><span class="field-label">Study context</span><textarea id="context" rows="3" placeholder="Country, sector, population, institution, period, or case setting"></textarea></label>
@@ -108,6 +120,6 @@
 
     <section class="card" style="margin-top:22px"><h2>4. Source records supplied to the draft</h2><p class="help">Relevant records should appear in normal citations and in the Source Use Audit. Detected retracted or withdrawn records are excluded where metadata exposes their status.</p><div id="filters" class="idea-meta"></div><div id="draftSourceSummary" class="attached-summary"></div><div id="sources" class="source-grid"></div></section>
   </main>
-  <script src="/static/article_writer.js?v=20260625-staged"></script>
+  <script src="/static/article_writer.js?v=20260710-pricing"></script>
 </body>
 </html>

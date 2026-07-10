@@ -47,7 +47,7 @@ function payload() {
     variables_or_themes: val("variablesThemes"),
     preferred_contribution: val("preferredContribution"),
     keywords: val("keywords"),
-    max_ideas: Number(val("maxIdeas") || 6),
+    max_ideas: Number(val("maxIdeas") || 10),
     resource_result_limit: Number(val("resourceResultLimit") || 6),
     include_source_search: $("includeSourceSearch").checked,
     include_research_resource_search: $("includeResourceSearch").checked,
@@ -189,7 +189,7 @@ function copyAll() {
 
 function clearAll() {
   $("ideaForm").reset();
-  $("maxIdeas").value = "6";
+  $("maxIdeas").value = "10";
   $("resourceResultLimit").value = "6";
   $("researchRoute").value = "Auto";
   $("ideas").innerHTML = `<p class="muted">Generated article ideas will appear here.</p>`;

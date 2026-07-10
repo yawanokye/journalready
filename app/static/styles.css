@@ -222,7 +222,8 @@ input:focus, select:focus, textarea:focus { outline: 3px solid rgba(30,94,255,.1
 /* Staged independent-article workflow and research resources */
 .stage-panel,
 .continuation-panel,
-.research-resource-panel {
+.research-resource-panel,
+.long-write-panel {
   margin: 18px 0;
   padding: 17px;
   border: 1px solid #c7d5ee;
@@ -232,6 +233,8 @@ input:focus, select:focus, textarea:focus { outline: 3px solid rgba(30,94,255,.1
 .stage-panel { border-left: 5px solid var(--teal); }
 .continuation-panel { border-left: 5px solid var(--gold); background: #fffaf1; }
 .research-resource-panel { border-left: 5px solid var(--blue); background: linear-gradient(180deg, #f5f8ff 0%, #fff 100%); }
+.long-write-panel { border-left: 5px solid #7c3aed; background: linear-gradient(180deg, #f7f3ff 0%, #fff 100%); }
+.long-write-panel textarea { min-height: 140px; }
 .stage-message {
   margin-top: 9px;
   padding: 10px 12px;
@@ -367,4 +370,71 @@ input:focus, select:focus, textarea:focus { outline: 3px solid rgba(30,94,255,.1
 @media (max-width: 900px) {
   .revision-layout { grid-template-columns: 1fr; }
   .revision-output-panel { position: static; max-height: none; }
+}
+
+
+/* Pricing page */
+.pricing-preview {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+  margin: 20px 0;
+  padding: 24px;
+  border: 1px solid #c7d5ee;
+  border-left: 6px solid var(--indigo);
+  border-radius: 22px;
+  background: white;
+  box-shadow: var(--shadow);
+}
+.pricing-preview h2 { max-width: 860px; }
+.pricing-hero .price { margin-top: 8px; }
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(285px, 1fr));
+  gap: 18px;
+  margin: 24px 0;
+}
+.pricing-card {
+  position: relative;
+  padding: 23px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: white;
+  box-shadow: var(--shadow);
+}
+.pricing-card h2 { margin-top: 10px; }
+.pricing-card ul { padding-left: 20px; margin: 14px 0; }
+.pricing-card li { margin: 7px 0; }
+.plan-badge {
+  display: inline-block;
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: #3730a3;
+  background: #eef2ff;
+  font-size: .76rem;
+  font-weight: 900;
+}
+.price {
+  margin: 10px 0 12px;
+  color: var(--navy);
+  font-size: 2.1rem;
+  line-height: 1;
+  font-weight: 950;
+  letter-spacing: -.03em;
+}
+.token-note {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: .9rem;
+  font-weight: 650;
+}
+.highlighted-plan { border-color: #9eb5ff; box-shadow: 0 24px 70px rgba(79,70,229,.16); }
+.main-plan { outline: 3px solid rgba(79,70,229,.13); }
+.free-plan { background: #fbfdff; }
+.pricing-notes { margin-top: 24px; }
+@media (max-width: 700px) {
+  .pricing-preview { flex-direction: column; align-items: flex-start; }
 }
