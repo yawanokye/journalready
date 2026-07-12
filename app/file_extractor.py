@@ -7,7 +7,7 @@ import re
 from typing import Any
 
 MAX_UPLOAD_BYTES = int(os.getenv("ARTICLEREADY_MAX_UPLOAD_BYTES", str(15 * 1024 * 1024)))
-MAX_EXTRACTED_CHARS = int(os.getenv("ARTICLEREADY_MAX_EXTRACTED_CHARS", "90000"))
+MAX_EXTRACTED_CHARS = int(os.getenv("ARTICLEREADY_MAX_EXTRACTED_CHARS", "190000"))
 
 
 def _normalise(text: str) -> str:
