@@ -6,6 +6,7 @@ import os
 import uuid
 
 from app.payments.store import claim_entitlement, complete_claim, rollback_claim
+from app.developer_access import validate_developer_token
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 PAYMENT_REQUIRED = os.environ.get("ARTICLEREADY_PAYMENT_REQUIRED", "1").strip().lower() not in {"0", "false", "no", "off"}
@@ -19,6 +20,7 @@ def credentials_from_headers(headers: Any) -> Dict[str, str]:
     return {
         "purchase_id": str(headers.get("x-articleready-purchase-id") or headers.get("x-projectready-purchase-id") or "").strip(),
         "access_token": str(headers.get("x-articleready-access-token") or headers.get("x-projectready-access-token") or "").strip(),
+        "developer_token": str(headers.get("x-articleready-developer-token") or "").strip(),
     }
 
 
@@ -36,11 +38,23 @@ def paid_article_action(
     *,
     purchase_id: str,
     access_token: str,
+    developer_token: str = "",
     action: str,
     idempotency_key: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
     database_url: str = "",
 ) -> Iterator[Dict[str, Any]]:
+    developer_claims = validate_developer_token(developer_token) if developer_token else None
+    if developer_claims:
+        yield {
+            "claimed": False,
+            "purchase": None,
+            "usage": None,
+            "payment_bypass": True,
+            "developer_access": True,
+            "developer_email": developer_claims.get("email") or "",
+        }
+        return
     if not PAYMENT_REQUIRED:
         yield {"claimed": False, "purchase": None, "usage": None, "payment_bypass": True}
         return
