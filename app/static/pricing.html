@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pricing | ArticleReady AI</title>
   <link rel="stylesheet" href="/static/styles.css?v=20260710-pricing">
+  <link rel="stylesheet" href="/static/articleready_payments.css?v=20260713-gpt56-payments">
 </head>
 <body>
   <header class="topbar">
@@ -30,6 +31,8 @@
         <p class="muted">Long manuscripts, review articles and reviewer-comment revisions require larger allowances because they use more source context and reasoning passes.</p>
       </aside>
     </section>
+
+    <p id="paymentStatus" class="status"></p>
 
     <section class="pricing-grid" aria-label="ArticleReady AI pricing plans">
       <article class="pricing-card free-plan">
@@ -58,7 +61,8 @@
           <li>Overlap and salami-slicing warnings</li>
         </ul>
         <p class="token-note">Internal allowance: about 20,000 tokens.</p>
-      </article>
+      
+        <button class="btn checkout-btn" type="button" data-plan="article_ideas" data-module="topic_ideas">Unlock this package</button></article>
 
       <article class="pricing-card">
         <span class="plan-badge">Before results</span>
@@ -73,7 +77,8 @@
           <li>DOCX export</li>
         </ul>
         <p class="token-note">Internal allowance: about 45,000 tokens.</p>
-      </article>
+      
+        <button class="btn checkout-btn" type="button" data-plan="stage1_article" data-module="article_writer">Unlock this package</button></article>
 
       <article class="pricing-card highlighted-plan main-plan">
         <span class="plan-badge">Most used</span>
@@ -88,7 +93,8 @@
           <li>One polishing pass</li>
         </ul>
         <p class="token-note">Internal allowance: about 80,000 tokens.</p>
-      </article>
+      
+        <button class="btn checkout-btn" type="button" data-plan="standard_full_article" data-module="article_writer">Unlock this package</button></article>
 
       <article class="pricing-card">
         <span class="plan-badge">Long writing</span>
@@ -102,7 +108,8 @@
           <li>One polishing pass</li>
         </ul>
         <p class="token-note">Internal allowance: about 120,000 tokens.</p>
-      </article>
+      
+        <button class="btn checkout-btn" type="button" data-plan="long_article_plus" data-module="article_writer">Unlock this package</button></article>
 
       <article class="pricing-card">
         <span class="plan-badge">Source-heavy</span>
@@ -116,7 +123,8 @@
           <li>One polishing pass</li>
         </ul>
         <p class="token-note">Internal allowance: about 150,000 tokens.</p>
-      </article>
+      
+        <button class="btn checkout-btn" type="button" data-plan="review_conceptual_scoping" data-module="article_writer">Unlock this package</button></article>
 
       <article class="pricing-card">
         <span class="plan-badge">Improve existing article</span>
@@ -130,7 +138,8 @@
           <li>Blue revised wording and red action items in DOCX</li>
         </ul>
         <p class="token-note">Internal allowance: about 60,000 tokens.</p>
-      </article>
+      
+        <button class="btn checkout-btn" type="button" data-plan="article_revision" data-module="article_revision">Unlock this package</button></article>
 
       <article class="pricing-card">
         <span class="plan-badge">Reviewer comments</span>
@@ -143,7 +152,8 @@
           <li>Blue revision DOCX</li>
         </ul>
         <p class="token-note">Internal allowance: about 75,000 tokens.</p>
-      </article>
+      
+        <button class="btn checkout-btn" type="button" data-plan="reviewer_comment_revision" data-module="article_revision">Unlock this package</button></article>
 
       <article class="pricing-card">
         <span class="plan-badge">Add-on</span>
@@ -155,7 +165,8 @@
           <li>Focused corrections or strengthening</li>
         </ul>
         <p class="token-note">Internal allowance: about 35,000 tokens.</p>
-      </article>
+      
+        <button class="btn checkout-btn" type="button" data-plan="extra_revision_pass" data-module="article_revision">Unlock this package</button></article>
     </section>
 
     <section class="pricing-notes card">
@@ -168,6 +179,14 @@
       </div>
     </section>
   </main>
-  <footer class="footer">ArticleReady AI, publication development with author verification.</footer>
+  <footer class="footer">ArticleReady AI, publication development with author verification. <a href="/payment/recover">Restore paid access</a>.</footer>
+  <script src="/static/articleready_payments.js?v=20260713-gpt56-payments"></script>
+  <script>
+    window.addEventListener('DOMContentLoaded', () => {
+      document.querySelectorAll('.checkout-btn[data-plan]').forEach((button) => {
+        button.addEventListener('click', () => ArticleReadyPayments.openCheckout(button.dataset.plan, {moduleKey: button.dataset.module}));
+      });
+    });
+  </script>
 </body>
 </html>

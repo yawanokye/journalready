@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Restore Paid Access | ArticleReady AI</title>
+  <link rel="stylesheet" href="/static/styles.css?v=20260713-gpt56">
+  <link rel="stylesheet" href="/static/articleready_payments.css?v=20260713-gpt56-payments">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><span class="brand-mark">AR</span><span>ArticleReady AI</span></a>
+    <nav class="nav"><a href="/">Home</a><a href="/topic-ideas">Article Topic Ideas</a><a href="/article-writer">Article Writer</a><a href="/article-revision">Article Revision</a><a href="/pricing">Pricing</a></nav>
+  </header>
+  <main class="shell">
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">Payment recovery</p>
+        <h1>Restore paid access.</h1>
+        <p class="lead">Use the email address entered at checkout and the Purchase ID returned after payment. A new access credential is issued to this browser after the transaction is verified.</p>
+      </div>
+      <aside class="hero-note">
+        <h2>Where to find the Purchase ID</h2>
+        <p>It appears in the payment return address and may also be supplied by ArticleReady support.</p>
+        <p class="muted">Never share your access token. The recovery form only asks for the payment email and Purchase ID.</p>
+      </aside>
+    </section>
+    <section class="card form-card" style="max-width:760px;margin:0 auto">
+      <h2>Paid access details</h2>
+      <label><span class="field-label">Payment email *</span><input id="recoveryEmail" type="email" autocomplete="email" placeholder="you@example.com"></label>
+      <label><span class="field-label">Purchase ID *</span><input id="recoveryPurchaseId" type="text" autocomplete="off" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></label>
+      <div class="actions"><button id="restoreAccessBtn" type="button">Restore paid access</button><a class="btn secondary" href="/pricing">Return to pricing</a></div>
+      <p id="recoveryStatus" class="status"></p>
+    </section>
+  </main>
+  <footer class="footer">ArticleReady AI, secure access recovery.</footer>
+  <script src="/static/articleready_payments.js?v=20260713-gpt56-payments"></script>
+  <script src="/static/payment_recover.js?v=20260713-gpt56-payments"></script>
+</body>
+</html>

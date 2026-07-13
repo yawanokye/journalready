@@ -61,6 +61,28 @@ function isIndependent() {
   return val("sourceMode") === "Develop as a new independent article";
 }
 
+function currentTargetWords() {
+  const explicit = Number(val("targetWordCount") || 0);
+  if (explicit) return Math.max(1200, Math.min(explicit, 30000));
+  const nums = (val("wordLimit") || "").replace(/,/g, "").match(/\d{3,5}/g) || [];
+  if (nums.length >= 2) return Math.round((Number(nums[0]) + Number(nums[1])) / 2);
+  if (nums.length === 1) return Number(nums[0]);
+  return 8000;
+}
+
+function updateLengthPlanSummary() {
+  const words = currentTargetWords();
+  const mode = val("longWriteMode") || "auto";
+  const sourceCount = attachedSourceBank.length;
+  const outputTokens = Math.round(words * 1.35);
+  const baseInput = 4500 + Math.round(sourceCount * 250);
+  const batch = mode === "batch" || (mode === "auto" && words >= 6500);
+  const estimatedTotal = batch ? Math.round((baseInput * 3.5) + outputTokens) : baseInput + outputTokens;
+  const modeText = batch ? "Batch drafting expected" : "Single-pass drafting expected";
+  $("tokenEstimateBadge").textContent = `${Math.round(estimatedTotal / 1000)}k token estimate`;
+  $("lengthPlanSummary").innerHTML = `<strong>${esc(words.toLocaleString())} target words.</strong> ${modeText}. Actual usage changes with uploaded material, source records, tables, figures and references.`;
+}
+
 function setGroupDisabled(groupId, disabled) {
   const group = $(groupId);
   if (!group) return;
@@ -100,6 +122,7 @@ function applyWorkflowState(sourceChanged = false) {
   $("stageMessage").textContent = messages[stage];
   $("draftBtn").textContent = initial ? "Draft article up to Methods" : continuation ? "Complete article from results" : "Draft full journal article";
   $("outputHelp").textContent = initial ? "This output should stop at Methods, followed only by readiness, resource and reference notes." : continuation ? "The earlier sections and uploaded results will be integrated into one completed article." : "Review all claims, citations, results and journal requirements before submission.";
+  updateLengthPlanSummary();
 }
 
 function sourceSearchPayload() {
@@ -135,7 +158,9 @@ function payload() {
     research_problem: val("researchProblem"), objectives: val("objectives"), theory_or_framework: val("theoryFramework"),
     variables_constructs: val("variablesConstructs"), data_and_results: val("dataResults"), key_findings: val("keyFindings"),
     contribution: val("contribution"), references_notes: val("referencesNotes"), instrument_requirements: val("instrumentRequirements"),
-    include_instrument_draft: Boolean($("includeInstrumentDraft")?.checked), word_limit: val("wordLimit"), citation_style: val("citationStyle"),
+    include_instrument_draft: Boolean($("includeInstrumentDraft")?.checked), word_limit: val("wordLimit"),
+    target_word_count: Number(val("targetWordCount") || 0) || null, article_structure: val("articleStructure"), long_write_mode: val("longWriteMode") || "auto",
+    citation_style: val("citationStyle"),
     include_source_search: Boolean($("includeSourceSearch")?.checked), include_older_foundational: Boolean($("includeOlderFoundational")?.checked),
     include_research_resource_search: Boolean($("includeResourceSearch")?.checked), source_search_terms: latestSourceSearchResult?.query || val("sourceSearchQuery"),
     source_bank: attachedSourceBank, research_resources: latestResearchResources || {},
@@ -166,6 +191,7 @@ function renderAttachedSummary() {
   const count = attachedSourceBank.length;
   $("attachedSourceBadge").textContent = `${count} attached`;
   $("attachedSourceSummary").innerHTML = count ? `<strong>${count} deduplicated source record${count === 1 ? "" : "s"} attached.</strong> These records will be sent with the article draft and filtered for relevance.` : "No literature records are attached yet.";
+  updateLengthPlanSummary();
 }
 
 function renderLatestSearch(result) {
@@ -195,7 +221,10 @@ function renderDraftSources(result) {
   const sources = result.source_records_used || [];
   const attachedCount = Number(result.attached_source_count || 0);
   const automaticCount = Number(result.automatic_source_count || 0);
-  $("draftSourceSummary").innerHTML = sources.length ? `<strong>${sources.length} source records supplied to the drafting model.</strong> ${attachedCount} came from the pre-draft attached bank and ${automaticCount} were found automatically. This doesn’t mean every record was cited.` : "No source records were supplied to this draft.";
+  const tokenEstimate = result.token_budget_estimate || {};
+  const tokenNote = tokenEstimate.estimated_total_tokens ? ` Estimated drafting tokens: about ${Number(tokenEstimate.estimated_total_tokens).toLocaleString()} across ${tokenEstimate.drafting_passes || 1} pass(es).` : "";
+  const batchNote = result.batch_drafting_applied ? " Batch drafting was applied for this long manuscript." : "";
+  $("draftSourceSummary").innerHTML = sources.length ? `<strong>${sources.length} source records supplied to the drafting workflow.</strong> ${attachedCount} came from the pre-draft attached bank and ${automaticCount} were found automatically. This doesn’t mean every record was cited.${tokenNote}${batchNote}` : `No source records were supplied to this draft.${tokenNote}${batchNote}`;
   $("sources").innerHTML = sources.length ? sources.map((src, index) => sourceCard(src, index, false)).join("") : `<p class="muted">No source records were available.</p>`;
 }
 
@@ -264,9 +293,12 @@ async function draft(event) {
   $("status").textContent = `Preparing the selected article stage${attachedMessage}...`;
   $("draftBtn").disabled = true; $("copyBtn").disabled = true; $("downloadBtn").disabled = true;
   try {
-    const response = await fetch("/api/articles/draft", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload())});
+    const planKey = window.ArticleReadyPayments ? ArticleReadyPayments.selectedDraftPlan() : '';
+    const headers = {"Content-Type":"application/json", ...(window.ArticleReadyPayments ? ArticleReadyPayments.paymentHeaders(planKey) : {})};
+    const response = await fetch("/api/articles/draft", {method:"POST", headers, body:JSON.stringify(payload())});
     const body = await response.json();
-    if (!response.ok) throw new Error(body.detail || response.statusText);
+    if (response.status === 402 && window.ArticleReadyPayments) { ArticleReadyPayments.openFromApi(body.detail || {}); return; }
+    if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : (body.detail?.message || response.statusText));
     lastText = body.article_text || "";
     lastInstrumentText = body.instrument_text || "";
     $("articleOutput").value = lastText;
@@ -296,14 +328,17 @@ async function downloadContent(text, title, filename) {
   if (!text) return;
   $("status").textContent = "Preparing the DOCX file...";
   try {
-    const response = await fetch("/api/articles/export", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({article_title:title, article_text:text})});
-    if (!response.ok) { let detail = response.statusText; try { detail = (await response.json()).detail || detail; } catch (_) {} throw new Error(detail); }
+    const planKey = window.ArticleReadyPayments ? ArticleReadyPayments.selectedDraftPlan() : '';
+    const headers = {"Content-Type":"application/json", ...(window.ArticleReadyPayments ? ArticleReadyPayments.paymentHeaders(planKey) : {})};
+    const response = await fetch("/api/articles/export", {method:"POST", headers, body:JSON.stringify({article_title:title, article_text:text})});
+    if (response.status === 402 && window.ArticleReadyPayments) { const data = await response.json().catch(() => ({})); ArticleReadyPayments.openFromApi(data.detail || {}); return; }
+    if (!response.ok) { let detail = response.statusText; try { const data = await response.json(); detail = typeof data.detail === 'string' ? data.detail : (data.detail?.message || detail); } catch (_) {} throw new Error(detail); }
     const blob = await response.blob(); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); $("status").textContent = "DOCX downloaded.";
   } catch (error) { $("status").textContent = `Export error: ${error.message}`; }
 }
 
 function clearAll() {
-  $("articleForm").reset(); $("wordLimit").value = "6000-8000"; $("draftStage").value = "full_article"; $("academicLevel").value = "Research Masters (e.g. MPhil)"; $("researchRoute").value = "Auto";
+  $("articleForm").reset(); $("wordLimit").value = "7000-9000"; $("targetWordCount").value = "8000"; $("longWriteMode").value = "auto"; $("articleStructure").value = ""; $("draftStage").value = "full_article"; $("academicLevel").value = "Research Masters (e.g. MPhil)"; $("researchRoute").value = "Auto";
   $("articleOutput").value = ""; $("instrumentOutput").value = ""; $("instrumentOutputPanel").hidden = true; $("instrumentRequirementsLabel").hidden = true; $("filters").innerHTML = ""; $("sources").innerHTML = ""; $("draftSourceSummary").innerHTML = ""; $("status").textContent = "";
   $("copyBtn").disabled = true; $("downloadBtn").disabled = true; lastText = ""; lastInstrumentText = ""; latestResearchResources = null; renderResearchResources(null); clearAttachedSources(); applyWorkflowState(false);
 }
@@ -315,6 +350,8 @@ window.addEventListener("DOMContentLoaded", () => {
   $("researchRoute").addEventListener("change", () => { $("resourceRouteBadge").textContent = val("researchRoute"); markResourcesStale(); });
   $("includeInstrumentDraft").addEventListener("change", () => { $("instrumentRequirementsLabel").hidden = !$("includeInstrumentDraft").checked; });
   ["articleTitle", "researchArea", "context", "objectives", "variablesConstructs", "methodology", "extractionFocus"].forEach(id => $(id).addEventListener("input", markResourcesStale));
+  ["wordLimit", "targetWordCount", "longWriteMode", "articleStructure"].forEach(id => $(id)?.addEventListener("input", updateLengthPlanSummary));
+  $("longWriteMode")?.addEventListener("change", updateLengthPlanSummary);
   $("articleForm").addEventListener("submit", draft);
   $("findSourcesBtn").addEventListener("click", findSources);
   $("clearSourcesBtn").addEventListener("click", clearAttachedSources);

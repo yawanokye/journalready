@@ -154,9 +154,11 @@ async function generate(event) {
   $("status").textContent = "Developing focused article ideas and searching for feasible data or instrument resources...";
   $("generateBtn").disabled = true;
   try {
-    const response = await fetch("/api/article-ideas", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload())});
+    const headers = {"Content-Type":"application/json", ...(window.ArticleReadyPayments ? ArticleReadyPayments.paymentHeaders('article_ideas') : {})};
+    const response = await fetch("/api/article-ideas", {method:"POST", headers, body:JSON.stringify(payload())});
     const body = await response.json();
-    if (!response.ok) throw new Error(body.detail || response.statusText);
+    if (response.status === 402 && window.ArticleReadyPayments) { ArticleReadyPayments.openFromApi(body.detail || {}); return; }
+    if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : (body.detail?.message || response.statusText));
     lastResult = body;
     renderIdeas(body);
     renderResources(body);
@@ -169,7 +171,7 @@ async function generate(event) {
     } else if (warnings) {
       $("status").textContent = `Ideas generated with ${warnings} source or resource warning(s). ${excluded ? `${excluded} weak or unrelated record(s) were excluded.` : ""}`;
     } else {
-      $("status").textContent = `Ideas generated using ${body.model_used || "the configured workflow"}. ${excluded ? `${excluded} weak or unrelated scholarly record(s) were excluded.` : ""}`;
+      $("status").textContent = `Ideas generated. ${excluded ? `${excluded} weak or unrelated scholarly record(s) were excluded.` : ""}`;
     }
   } catch (error) { $("status").textContent = `Error: ${error.message}`; }
   finally { $("generateBtn").disabled = false; }
@@ -189,7 +191,7 @@ function copyAll() {
 
 function clearAll() {
   $("ideaForm").reset();
-  $("maxIdeas").value = "10";
+  $("maxIdeas").value = "20";
   $("resourceResultLimit").value = "6";
   $("researchRoute").value = "Auto";
   $("ideas").innerHTML = `<p class="muted">Generated article ideas will appear here.</p>`;

@@ -102,13 +102,15 @@ form.addEventListener('submit', async (event) => {
   copyMatrixBtn.disabled = true;
   message('Revising the manuscript and assessing publication readiness…');
   try {
+    const planKey = window.ArticleReadyPayments ? ArticleReadyPayments.selectedRevisionPlan() : '';
     const response = await fetch('/api/articles/revise', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(window.ArticleReadyPayments ? ArticleReadyPayments.paymentHeaders(planKey) : {}) },
       body: JSON.stringify(payload),
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || 'Article revision failed.');
+    if (response.status === 402 && window.ArticleReadyPayments) { ArticleReadyPayments.openFromApi(data.detail || {}); return; }
+    if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : (data.detail?.message || 'Article revision failed.'));
     lastResult = data;
     revisedArticle.value = data.revised_article_text || '';
     revisionReport.value = data.revision_report || '';
@@ -146,9 +148,10 @@ downloadRevisionBtn.addEventListener('click', async () => {
   message('Preparing the DOCX with revisions shown in blue…');
   downloadRevisionBtn.disabled = true;
   try {
+    const planKey = window.ArticleReadyPayments ? ArticleReadyPayments.selectedRevisionPlan() : '';
     const response = await fetch('/api/articles/revision/export', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(window.ArticleReadyPayments ? ArticleReadyPayments.paymentHeaders(planKey) : {}) },
       body: JSON.stringify({
         article_title: byId('articleTitle').value.trim() || 'Revised Journal Article',
         original_article_text: articleText.value.trim(),
@@ -158,9 +161,14 @@ downloadRevisionBtn.addEventListener('click', async () => {
         include_revision_report: true,
       }),
     });
+    if (response.status === 402 && window.ArticleReadyPayments) {
+      const data = await response.json().catch(() => ({}));
+      ArticleReadyPayments.openFromApi(data.detail || {});
+      return;
+    }
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
-      throw new Error(data.detail || 'Revision export failed.');
+      throw new Error(typeof data.detail === 'string' ? data.detail : (data.detail?.message || 'Revision export failed.')); 
     }
     const blob = await response.blob();
     const disposition = response.headers.get('Content-Disposition') || '';
