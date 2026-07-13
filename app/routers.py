@@ -59,7 +59,7 @@ def create_article_ideas(payload: ArticleIdeaRequest, request: Request) -> dict[
     try:
         data = payload.model_dump()
         creds = credentials_from_headers(request.headers)
-        free_trial = int(data.get("max_ideas") or 0) <= 3 and not (creds["purchase_id"] and creds["access_token"])
+        free_trial = int(data.get("max_ideas") or 0) <= 3 and not ((creds["purchase_id"] and creds["access_token"]) or creds["developer_token"])
         if free_trial:
             # The free trial deliberately excludes live scholarly/resource searches.
             # Paid access is required for source-supported portfolios and for more than three ideas.
@@ -70,6 +70,7 @@ def create_article_ideas(payload: ArticleIdeaRequest, request: Request) -> dict[
             with paid_article_action(
                 purchase_id=creds["purchase_id"],
                 access_token=creds["access_token"],
+                developer_token=creds["developer_token"],
                 action="idea",
                 metadata={"plan_recommended": "article_ideas", "max_ideas": data.get("max_ideas")},
             ):
@@ -131,6 +132,7 @@ def create_journal_article(payload: JournalArticleRequest, request: Request) -> 
             with paid_article_action(
                 purchase_id=creds["purchase_id"],
                 access_token=creds["access_token"],
+                developer_token=creds["developer_token"],
                 action="draft",
                 metadata={"plan_recommended": plan_key, "article_title": data.get("article_title"), "draft_stage": data.get("draft_stage")},
             ):
@@ -153,6 +155,7 @@ def export_journal_article(payload: ArticleExportRequest, request: Request) -> S
             with paid_article_action(
                 purchase_id=creds["purchase_id"],
                 access_token=creds["access_token"],
+                developer_token=creds["developer_token"],
                 action="export",
                 metadata={"article_title": payload.article_title, "export_type": "article_draft"},
             ):
@@ -180,6 +183,7 @@ def revise_existing_article(payload: ArticleRevisionRequest, request: Request) -
             with paid_article_action(
                 purchase_id=creds["purchase_id"],
                 access_token=creds["access_token"],
+                developer_token=creds["developer_token"],
                 action="revision",
                 metadata={"plan_recommended": plan_key, "article_title": data.get("article_title"), "has_review_comments": bool(str(data.get("review_comments") or "").strip())},
             ):
@@ -202,6 +206,7 @@ def export_revised_article(payload: ArticleRevisionExportRequest, request: Reque
             with paid_article_action(
                 purchase_id=creds["purchase_id"],
                 access_token=creds["access_token"],
+                developer_token=creds["developer_token"],
                 action="export",
                 metadata={"article_title": payload.article_title, "export_type": "revised_article"},
             ):
