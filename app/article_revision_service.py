@@ -9,11 +9,14 @@ from datetime import datetime
 from typing import Any
 
 from app.article_service import (
-    _apply_strong_article_humanisation,
     _article_prompt_quality_pack,
     _article_reference_expectations,
+    _call_openai_response_with_fallback,
     _finalise_article_text,
     _humanisation_strength,
+    _humanize_article_with_model,
+    _humanizer_mode,
+    _normalise_gpt56_model,
     _parse_inline_segments,
     _plain_inline_text,
     _safe_get_openai_client,
@@ -28,12 +31,14 @@ _ACTION_RED = (192, 0, 0)
 
 
 def _revision_model() -> str:
-    return (
+    return _normalise_gpt56_model(
         os.getenv("OPENAI_ARTICLE_REVISION_MODEL")
+        or os.getenv("OPENAI_ARTICLE_SOL_MODEL")
         or os.getenv("OPENAI_ARTICLE_DOCTORAL_MODEL")
         or os.getenv("OPENAI_ARTICLE_RESEARCH_MODEL")
-        or "gpt-5.5"
-    ).strip()
+        or "",
+        "gpt-5.6-sol",
+    )
 
 
 def _extract_response_text(response: Any) -> str:
@@ -187,6 +192,7 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
     provider_errors = list(search_result.get("provider_errors") or [])
     model = _revision_model()
     client = _safe_get_openai_client()
+    model_used = "none"
 
     if not client or os.getenv("ARTICLEREADY_REVISION_USE_AI", "1").strip().lower() in {"0", "false", "no"}:
         revised_article = article_text
@@ -265,8 +271,10 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
             "include_reviewer_response_matrix": bool(payload.get("include_reviewer_response_matrix", True)),
         }
         try:
-            response = client.responses.create(
-                model=model,
+            raw, model_used, attempt_notes = _call_openai_response_with_fallback(
+                client,
+                primary_model=model,
+                fallback_model=os.getenv("OPENAI_ARTICLE_TERRA_MODEL", "gpt-5.6-terra"),
                 instructions=(
                     "You are ArticleReady AI's senior journal article revision editor. Revise rigorously but preserve the study's confirmed evidence, "
                     "valid citations and substantive authorial voice. Apply the supplied strong human-supervised academic writing layer to produce natural, "
@@ -275,9 +283,10 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
                     "Never invent analysis or results. Do not add artificial errors or mention AI detection or humanisation. "
                     "Clearly separate manuscript revision from recommendations for further analysis."
                 ),
-                input=json.dumps(prompt, ensure_ascii=False, indent=2),
+                input_payload=json.dumps(prompt, ensure_ascii=False, indent=2),
+                max_output_tokens=int(os.getenv("ARTICLEREADY_REVISION_MAX_OUTPUT_TOKENS", "32000") or 32000),
             )
-            raw = _extract_response_text(response)
+            provider_errors.extend(attempt_notes)
             revised_article, revision_report, reviewer_matrix = _split_revision_package(raw)
             if not revised_article:
                 revised_article = article_text
@@ -294,15 +303,14 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
             mode = "metadata_fallback_after_ai_error"
 
     revised_article = _finalise_article_text(revised_article)
+    humanizer_report: dict[str, Any] = {"mode": _humanizer_mode(), "applied": False}
+    humanizer_models: list[str] = []
     if mode == "ai_revision":
-        revised_article = _apply_strong_article_humanisation(
+        revised_article, humanizer_report, humanizer_models = _humanize_article_with_model(
+            client,
             revised_article,
-            seed_text="|".join([
-                str(payload.get("article_title") or ""),
-                str(payload.get("article_type") or ""),
-                str(payload.get("target_journal") or ""),
-                "revision",
-            ]),
+            payload=payload,
+            provider_errors=provider_errors,
         )
         revised_article = _finalise_article_text(revised_article)
     revision_report = _finalise_article_text(revision_report)
@@ -312,7 +320,7 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
         "revised_article_text": revised_article,
         "revision_report": revision_report,
         "reviewer_response_matrix": reviewer_matrix,
-        "model_used": model if client else "none",
+        "model_used": model_used if client else "none",
         "mode": mode,
         "source_records_used": source_records,
         "source_bank_count": len(source_records),
@@ -322,6 +330,8 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
         "revision_colour_note": "In the downloaded DOCX, wording added or changed by ArticleReady AI is shown in blue. Author-action items are shown in red. Exact unchanged wording remains black.",
         "human_like_writing_layer_applied": mode == "ai_revision" and _strong_humanisation_enabled(),
         "humanisation_strength": _humanisation_strength(),
+        "humanizer_report": humanizer_report,
+        "humanizer_models_used": humanizer_models,
         "quality_filters": [
             "The same strong human-supervised academic writing layer used by the Article Writer is applied to article revision.",
             "The post-processing pass is deterministic and protects confirmed evidence, citations, tables, equations, placeholders and references.",

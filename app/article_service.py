@@ -15,6 +15,15 @@ except Exception:  # pragma: no cover
     search_literature_sources = None
 
 from app.research_resources import discover_research_resources, infer_research_route
+from app.scholarly_humanizer import (
+    analyse_scholarly_style,
+    build_humanizer_batches,
+    humanize_scholarly_text,
+    humanizer_variation_profile,
+    scholarly_humanizer_prompt_rules,
+    validate_humanizer_preservation,
+    variation_targets_met,
+)
 
 # Dynamic source context defaults are controlled through helpers below.  Keep this
 # reasonably high because journal articles need deeper citation coverage than a
@@ -56,20 +65,109 @@ def _safe_get_openai_client():
         return None
 
 
-def _select_article_model(level: str, article_type: str = "") -> str:
-    """Route journal article drafting by academic depth and publication complexity."""
+def _normalise_gpt56_model(value: str, fallback: str) -> str:
+    """Restrict ArticleReady OpenAI routing to GPT-5.6 Terra or Sol."""
+    model = str(value or "").strip().lower()
+    allowed = {"gpt-5.6-terra", "gpt-5.6-sol"}
+    return model if model in allowed else fallback
+
+
+def _select_article_model(level: str, article_type: str = "", payload: dict[str, Any] | None = None) -> str:
+    """Route all ArticleReady OpenAI work through GPT-5.6 Terra or Sol.
+
+    Terra handles cost-balanced drafting. Sol handles doctoral, review, long,
+    synthesis-heavy and other high-complexity work. Environment overrides are
+    retained, but their defaults are restricted to the GPT-5.6 family.
+    """
+    payload = payload or {}
     level_l = (level or "").strip().lower()
     type_l = (article_type or "").strip().lower()
+    stage = str(payload.get("draft_stage") or "").strip().lower()
+    target_words = int(payload.get("target_word_count") or 0)
+    long_mode = str(payload.get("long_write_mode") or "auto").strip().lower()
+
     is_doctoral = any(token in level_l for token in ["phd", "doctor", "dba", "ded", "professional doctorate"])
     is_research_masters = "research masters" in level_l or "mphil" in level_l
-    is_review_article = any(token in type_l for token in ["systematic", "scoping", "meta-analysis", "meta analysis", "review article", "literature review", "conceptual"])
-    if is_doctoral:
-        return os.getenv("OPENAI_ARTICLE_DOCTORAL_MODEL", os.getenv("OPENAI_DOCTORAL_DRAFT_MODEL", "gpt-5.5")).strip()
-    if is_research_masters or is_review_article:
-        return os.getenv("OPENAI_ARTICLE_RESEARCH_MODEL", os.getenv("OPENAI_RESEARCH_MASTERS_DRAFT_MODEL", "gpt-5.5")).strip()
-    if "non-research" in level_l or "master" in level_l:
-        return os.getenv("OPENAI_ARTICLE_MASTERS_MODEL", "gpt-5.4").strip()
-    return os.getenv("OPENAI_ARTICLE_BACHELOR_MODEL", os.getenv("OPENAI_BACHELOR_DRAFT_MODEL", "gpt-5.4")).strip()
+    is_review_article = any(token in type_l for token in [
+        "systematic", "scoping", "meta-analysis", "meta analysis",
+        "review article", "literature review", "conceptual", "theory",
+    ])
+    is_long = target_words > 9000 or long_mode == "batch"
+    is_completion = stage == "continuation_after_results"
+
+    terra = _normalise_gpt56_model(
+        os.getenv("OPENAI_ARTICLE_TERRA_MODEL")
+        or os.getenv("OPENAI_ARTICLE_MASTERS_MODEL")
+        or os.getenv("OPENAI_ARTICLE_BACHELOR_MODEL")
+        or "",
+        "gpt-5.6-terra",
+    )
+    sol = _normalise_gpt56_model(
+        os.getenv("OPENAI_ARTICLE_SOL_MODEL")
+        or os.getenv("OPENAI_ARTICLE_DOCTORAL_MODEL")
+        or os.getenv("OPENAI_ARTICLE_RESEARCH_MODEL")
+        or "",
+        "gpt-5.6-sol",
+    )
+
+    if is_doctoral or is_research_masters or is_review_article or is_long or is_completion:
+        return sol
+    return terra
+
+
+def _openai_model_candidates(primary_model: str, *, fallback_model: str = "") -> list[str]:
+    """Return an ordered GPT-5.6-only model chain with duplicates removed."""
+    terra = _normalise_gpt56_model(os.getenv("OPENAI_ARTICLE_TERRA_MODEL", ""), "gpt-5.6-terra")
+    sol = _normalise_gpt56_model(os.getenv("OPENAI_ARTICLE_SOL_MODEL", ""), "gpt-5.6-sol")
+    configured_fallback = fallback_model or os.getenv("OPENAI_ARTICLE_FALLBACK_MODEL") or ""
+    candidates: list[str] = []
+    for raw_model, default in [
+        (primary_model, terra),
+        (configured_fallback, terra),
+        (terra, "gpt-5.6-terra"),
+        (sol, "gpt-5.6-sol"),
+    ]:
+        model = _normalise_gpt56_model(str(raw_model or ""), default)
+        if model not in candidates:
+            candidates.append(model)
+    return candidates
+
+
+def _call_openai_response_with_fallback(
+    client: Any,
+    *,
+    primary_model: str,
+    instructions: str,
+    input_payload: Any,
+    max_output_tokens: int | None = None,
+    fallback_model: str = "",
+) -> tuple[str, str, list[str]]:
+    """Call the Responses API with a Terra/Sol fallback chain.
+
+    Returns response text, the model that succeeded, and non-fatal attempt notes.
+    """
+    errors: list[str] = []
+    last_exc: Exception | None = None
+    for model in _openai_model_candidates(primary_model, fallback_model=fallback_model):
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "instructions": instructions,
+            "input": input_payload,
+        }
+        if max_output_tokens:
+            kwargs["max_output_tokens"] = int(max_output_tokens)
+        try:
+            response = client.responses.create(**kwargs)
+            text = _extract_text(response)
+            if text:
+                return text, model, errors
+            errors.append(f"{model} returned no usable text.")
+        except Exception as exc:  # pragma: no cover - provider behaviour varies
+            last_exc = exc
+            errors.append(f"{model}: {str(exc)[:180]}")
+    if last_exc:
+        raise RuntimeError("; ".join(errors)) from last_exc
+    raise RuntimeError("No configured GPT-5.6 model returned usable text.")
 
 
 def _article_kind(article_type: str) -> str:
@@ -476,7 +574,9 @@ def _strong_humanisation_requirements(payload: dict[str, Any]) -> dict[str, Any]
     return {
         "mode": "strong_human_supervised",
         "enabled_by_default": True,
+        "variation_profile": humanizer_variation_profile(),
         "rules": [
+            *scholarly_humanizer_prompt_rules(),
             "Apply controlled high burstiness and high lexical variation while preserving clarity, evidence and disciplinary precision.",
             "Allow sentence length to vary naturally. Split overloaded sentences at defensible clause boundaries, but do not create fragments.",
             "Vary paragraph shape and openings according to the argument rather than through random transition words.",
@@ -874,58 +974,431 @@ def _apply_strong_article_humanisation(
     seed_text: str = "",
     preserve_reference_section: bool = True,
 ) -> str:
-    """Apply the strong, evidence-safe humanisation layer adapted from ai_service.py.
+    """Apply the shared ThesisReady scholarly humaniser deterministically.
 
-    The pass is deterministic for the same text and seed. It changes prose rhythm and
-    repetitive wording, but protects headings, tables, code blocks, equations, citations,
-    placeholders, references and article structure.
+    The shared layer removes formulaic phrasing and improves controlled lexical
+    and rhythmic variation while preserving headings, evidence, citations,
+    numbers, tables, equations, URLs and action placeholders.
     """
     if not text or not _strong_humanisation_enabled():
         return text
     strength = _humanisation_strength()
-    if strength == "light":
-        target_std, lexical_probability, texture_probability = 7.0, 0.18, 0.15
-    elif strength == "standard":
-        target_std, lexical_probability, texture_probability = 8.5, 0.25, 0.25
+    mode = {"light": "light", "standard": "balanced", "strong": "deep"}.get(strength, "deep")
+    candidate, _report = humanize_scholarly_text(text, mode=mode)
+    valid, _issues = validate_humanizer_preservation(
+        text,
+        candidate,
+        max_word_change_ratio=float(humanizer_variation_profile()["model_word_change_limit"]),
+    )
+    return candidate if valid else text
+
+
+def _humanizer_model() -> str:
+    return _normalise_gpt56_model(
+        os.getenv("OPENAI_ARTICLE_HUMANIZER_MODEL") or os.getenv("OPENAI_ARTICLE_TERRA_MODEL") or "",
+        "gpt-5.6-terra",
+    )
+
+
+def _humanizer_mode() -> str:
+    configured = str(os.getenv("ARTICLEREADY_HUMANIZER_MODE", "balanced") or "balanced").strip().lower()
+    return configured if configured in {"off", "light", "balanced", "deep"} else "balanced"
+
+
+def _humanizer_batch_output_tokens(word_count: int) -> int:
+    words = max(250, int(word_count or 0))
+    return max(1800, min(9000, int(words * 2.1)))
+
+
+def _humanize_article_with_model(
+    client: Any,
+    text: str,
+    *,
+    payload: dict[str, Any],
+    provider_errors: list[Any],
+) -> tuple[str, dict[str, Any], list[str]]:
+    """Run the same preservation-gated section-batched humaniser used in ThesisReady.
+
+    The deterministic pass always runs when enabled. The optional Terra pass
+    touches only weak sections in balanced mode and all eligible sections in
+    deep mode. Failure never invalidates the completed article.
+    """
+    mode = _humanizer_mode()
+    local_text, local_report = humanize_scholarly_text(text, mode=mode)
+    models_used: list[str] = []
+    if mode in {"off", "light"} or not client or not local_text.strip():
+        return local_text, local_report, models_used
+    if os.getenv("ARTICLEREADY_HUMANIZER_MODEL_PASS", "1").strip().lower() in {"0", "false", "no", "off"}:
+        return local_text, local_report, models_used
+
+    variation_profile = humanizer_variation_profile()
+    threshold = int(os.getenv("ARTICLEREADY_HUMANIZER_MODEL_THRESHOLD", "97") or 97)
+    style_context = any(str(payload.get(key) or "").strip() for key in (
+        "author_guidelines", "target_journal", "article_structure", "references_notes", "revision_goals"
+    ))
+    if (
+        mode == "balanced"
+        and not style_context
+        and int(local_report.get("score") or 100) >= threshold
+        and variation_targets_met(local_report, variation_profile)
+    ):
+        return local_text, local_report, models_used
+
+    batch_words = int(os.getenv("ARTICLEREADY_HUMANIZER_BATCH_WORDS", "1800") or 1800)
+    batches = build_humanizer_batches(local_text, max_words=batch_words)
+    eligible = [
+        index for index, batch in enumerate(batches)
+        if not batch.get("protected")
+        and int((batch.get("diagnostic") or {}).get("word_count") or 0) >= 120
+        and (
+            mode == "deep"
+            or style_context
+            or int((batch.get("diagnostic") or {}).get("score") or 100) < threshold
+            or not variation_targets_met(batch.get("diagnostic") or {}, variation_profile)
+        )
+    ]
+    if mode == "balanced":
+        eligible.sort(key=lambda index: int((batches[index].get("diagnostic") or {}).get("score") or 100))
+        eligible = eligible[:max(1, int(os.getenv("ARTICLEREADY_HUMANIZER_MAX_BATCHES_BALANCED", "6") or 6))]
     else:
-        target_std, lexical_probability, texture_probability = 10.0, 0.35, 0.35
+        eligible = eligible[:max(1, int(os.getenv("ARTICLEREADY_HUMANIZER_MAX_BATCHES_DEEP", "16") or 16))]
+    if not eligible:
+        return local_text, local_report, models_used
 
-    reference_tail = ""
-    body = text
-    if preserve_reference_section:
-        match = re.search(r"(?im)^#{1,4}\s+(references|source use audit)\s*$", text)
-        if match:
-            body = text[:match.start()].rstrip()
-            reference_tail = "\n\n" + text[match.start():].lstrip()
-
-    protected_body, protected = _protect_humanisation_regions(body)
-    blocks = re.split(r"(\n\s*\n)", protected_body)
-    rng = _humanisation_rng(text, seed_text)
-    for index in range(0, len(blocks), 2):
-        block = blocks[index]
-        if not _is_humanisable_block(block):
+    chosen = set(eligible)
+    output: list[str] = []
+    for index, batch in enumerate(batches):
+        original = str(batch.get("text") or "")
+        if index not in chosen:
+            output.append(original)
             continue
-        polished = _light_human_article_polish(block)
-        polished = _increase_natural_variation(polished, rng)
-        polished = _enforce_burstiness(polished, target_std_dev=target_std, rng=rng)
-        polished = _add_drafting_artefacts(polished, probability_per_500_words=texture_probability, rng=rng)
-        polished = _boost_lexical_richness(polished, replacement_probability=lexical_probability, rng=rng)
-        polished = _cluster_citations(polished)
-        polished = _force_short_sentences(polished, target_every_n_words=220)
-        polished = _add_human_noise(polished)
-        blocks[index] = polished
+        prompt = {
+            "task": "Refine this journal article section for natural scholarly flow without changing its substance.",
+            "article_type": str(payload.get("article_type") or ""),
+            "research_area": str(payload.get("research_area") or payload.get("article_title") or ""),
+            "style_diagnostic": batch.get("diagnostic") or {},
+            "variation_profile": variation_profile,
+            "rules": [
+                "Revise rather than restart.",
+                *scholarly_humanizer_prompt_rules(),
+                "Preserve every heading, citation, reference, date, statistic, objective, question, hypothesis, table, equation, URL and bracketed author-action item exactly.",
+                "Do not add evidence, citations, findings, examples, interpretations, recommendations or new sections.",
+                "Preserve the order of ideas and the strength of claims.",
+                "Keep the word count within six percent of the supplied section.",
+                "Return only the revised section with its headings and no report.",
+            ],
+            "section": original,
+        }
+        try:
+            candidate, used_model, attempt_notes = _call_openai_response_with_fallback(
+                client,
+                primary_model=_humanizer_model(),
+                fallback_model=os.getenv("OPENAI_ARTICLE_SOL_MODEL", "gpt-5.6-sol"),
+                instructions="Perform an evidence-preserving, high-variation scholarly naturalness edit. Return only the revised section.",
+                input_payload=json.dumps(prompt, ensure_ascii=False, indent=2),
+                max_output_tokens=_humanizer_batch_output_tokens(int(batch.get("word_count") or 0)),
+            )
+            provider_errors.extend(attempt_notes)
+            candidate, _ = humanize_scholarly_text(candidate, mode="balanced") if candidate else (original, {})
+            valid, _issues = validate_humanizer_preservation(
+                original,
+                candidate,
+                max_word_change_ratio=float(variation_profile["model_word_change_limit"]),
+            )
+            output.append(candidate if candidate and valid else original)
+            if used_model and used_model not in models_used:
+                models_used.append(used_model)
+        except Exception as exc:  # optional stage
+            provider_errors.append(f"Humaniser pass skipped for one section: {str(exc)[:180]}")
+            output.append(original)
 
-    output = "".join(blocks)
-    output = _vary_paragraph_openings(output)
-    output = _restore_humanisation_regions(output, protected)
-    output = re.sub(r"[ \t]{2,}", " ", output)
-    output = re.sub(r"\n{3,}", "\n\n", output).strip()
-    return output + reference_tail
+    candidate = "\n\n".join(part.strip() for part in output if part.strip()).strip()
+    valid, issues = validate_humanizer_preservation(
+        local_text,
+        candidate,
+        max_word_change_ratio=float(variation_profile["model_word_change_limit"]),
+    )
+    final_text = candidate if valid else local_text
+    final_text, final_report = humanize_scholarly_text(final_text, mode=mode)
+    final_report["model_pass_applied"] = bool(models_used)
+    final_report["model_pass_models"] = models_used
+    if issues and not valid:
+        final_report["preservation_issues"] = issues
+    return final_text, final_report, models_used
 
 
 def _is_independent_article(payload: dict[str, Any]) -> bool:
     return "new independent article" in str(payload.get("source_mode") or "").strip().lower()
 
+
+
+# ----------------------------------------------------------------------
+# LONG ARTICLE / BATCH WRITING CONTROLS
+# ----------------------------------------------------------------------
+
+
+def _normalise_int(text: Any) -> int | None:
+    value = str(text or "").replace(",", "").strip()
+    if not value:
+        return None
+    match = re.search(r"\d+", value)
+    return int(match.group(0)) if match else None
+
+
+def _article_word_range(payload: dict[str, Any]) -> tuple[int, int, int]:
+    """Return minimum, maximum and target words requested by the user."""
+    explicit = payload.get("target_word_count")
+    if explicit:
+        words = max(1200, min(int(explicit), 30000))
+        span = max(250, int(words * 0.08))
+        return max(800, words - span), words + span, words
+
+    raw = str(payload.get("word_limit") or "").replace(",", "")
+    numbers = [int(x) for x in re.findall(r"\d{3,5}", raw)]
+    if len(numbers) >= 2:
+        low, high = min(numbers[0], numbers[1]), max(numbers[0], numbers[1])
+        return max(800, low), max(low, high), int(round((low + high) / 2))
+    if len(numbers) == 1:
+        words = max(1200, min(numbers[0], 30000))
+        span = max(250, int(words * 0.10))
+        return max(800, words - span), words + span, words
+
+    stage = str(payload.get("draft_stage") or "full_article")
+    if stage == "initial_to_methods":
+        return 4500, 6000, 5200
+    if _article_kind(str(payload.get("article_type") or "")) == "short_communication_or_brief_report":
+        return 2500, 4000, 3200
+    return 6000, 8000, 7000
+
+
+def _default_article_sections(payload: dict[str, Any], target_words: int) -> list[dict[str, Any]]:
+    stage = str(payload.get("draft_stage") or "full_article")
+    article_type = str(payload.get("article_type") or "Empirical research article")
+    is_review = _article_kind(article_type) in {"review_article_or_literature_review", "systematic_review_or_meta_analysis"}
+    if stage == "initial_to_methods":
+        sections = [
+            ("Title, protocol-style abstract and keywords", 0.08),
+            ("Introduction", 0.20),
+            ("Literature review and theoretical positioning", 0.27),
+            ("Conceptual or analytical framework and hypotheses/propositions", 0.15),
+            ("Methods", 0.25),
+            ("Methods readiness checklist, next-stage note and references", 0.05),
+        ]
+    elif stage == "continuation_after_results":
+        sections = [
+            ("Updated abstract and article alignment", 0.08),
+            ("Earlier sections revised for result alignment", 0.14),
+            ("Results or findings", 0.22),
+            ("Discussion", 0.26),
+            ("Conclusion, contribution, implications and limitations", 0.18),
+            ("Declarations, references and source use audit", 0.12),
+        ]
+    elif is_review:
+        sections = [
+            ("Title, abstract and keywords", 0.06),
+            ("Introduction", 0.15),
+            ("Review protocol and methods", 0.14),
+            ("Thematic or evidence synthesis", 0.34),
+            ("Conceptual contribution and research agenda", 0.17),
+            ("Conclusion, limitations, declarations and references", 0.14),
+        ]
+    else:
+        sections = [
+            ("Title, abstract and keywords", 0.06),
+            ("Introduction", 0.16),
+            ("Literature review and theoretical background", 0.20),
+            ("Conceptual or analytical framework and hypotheses", 0.08),
+            ("Methods", 0.14),
+            ("Results or findings", 0.14),
+            ("Discussion", 0.16),
+            ("Conclusion, contributions, implications, limitations, declarations and references", 0.06),
+        ]
+    return [
+        {"heading": heading, "target_words": max(250, int(round((target_words * weight) / 50) * 50))}
+        for heading, weight in sections
+    ]
+
+
+def _parse_user_article_structure(payload: dict[str, Any], target_words: int) -> list[dict[str, Any]]:
+    raw = str(payload.get("article_structure") or "").strip()
+    if not raw:
+        return _default_article_sections(payload, target_words)
+    rows: list[dict[str, Any]] = []
+    for line in raw.splitlines():
+        clean = line.strip(" -\t")
+        if not clean:
+            continue
+        words = None
+        word_match = re.search(r"(?:\(|\b)(\d{3,5})\s*(?:words?|wds?)?\)?\s*$", clean, flags=re.IGNORECASE)
+        if word_match:
+            words = int(word_match.group(1))
+            clean = clean[: word_match.start()].strip(" -:;,()")
+        clean = re.sub(r"^\d+(?:\.\d+)*[.)]?\s*", "", clean).strip()
+        if clean:
+            rows.append({"heading": clean, "target_words": max(150, min(words or 0, 8000)) if words else 0})
+    if not rows:
+        return _default_article_sections(payload, target_words)
+    specified = sum(item["target_words"] for item in rows if item["target_words"])
+    missing = [item for item in rows if not item["target_words"]]
+    remainder = max(0, target_words - specified)
+    if missing:
+        share = max(200, int(round((remainder / len(missing)) / 50) * 50))
+        for item in missing:
+            item["target_words"] = share
+    return rows[:18]
+
+
+def _article_length_structure_requirements(payload: dict[str, Any]) -> dict[str, Any]:
+    min_words, max_words, target_words = _article_word_range(payload)
+    sections = _parse_user_article_structure(payload, target_words)
+    return {
+        "requested_word_limit": str(payload.get("word_limit") or ""),
+        "minimum_words": min_words,
+        "target_words": target_words,
+        "maximum_words": max_words,
+        "structure_source": "user_supplied" if str(payload.get("article_structure") or "").strip() else "article_type_default",
+        "long_write_mode": str(payload.get("long_write_mode") or "auto"),
+        "batch_threshold_words": int(os.getenv("ARTICLEREADY_BATCH_DRAFT_WORD_THRESHOLD", "6500") or 6500),
+        "sections": sections,
+        "length_rules": [
+            "Treat the word limit as a depth and structure requirement, not permission to add filler.",
+            "Meet the length through sharper conceptualisation, stronger literature synthesis, method justification, transparent analysis reporting and rigorous discussion.",
+            "Follow the user's article structure when supplied. Do not merge or omit requested sections unless the selected stage forbids them.",
+            "For long articles, develop each section to its allocated target and avoid ending with a short outline when a full manuscript is requested.",
+            "If evidence is missing for a requested section, keep the section but insert a red [Author action: ...] item rather than inventing facts, results or citations.",
+        ],
+    }
+
+
+def _should_batch_draft(payload: dict[str, Any], length_plan: dict[str, Any]) -> bool:
+    mode = str(payload.get("long_write_mode") or "auto").strip().lower()
+    if mode == "single_pass":
+        return False
+    if mode == "batch":
+        return True
+    target_words = int(length_plan.get("target_words") or 0)
+    threshold = int(length_plan.get("batch_threshold_words") or 6500)
+    return target_words >= threshold
+
+
+def _max_output_tokens_for_article(target_words: int, *, section_batch: bool = False) -> int:
+    """Set a practical output ceiling from the target prose length."""
+    target_words = max(500, int(target_words or 0))
+    multiplier = 2.4 if section_batch else 1.9
+    base = 1400 if section_batch else 3000
+    estimated = int(target_words * multiplier + base)
+    default_cap = int(os.getenv("ARTICLEREADY_ARTICLE_MAX_OUTPUT_TOKENS", "24000") or 24000)
+    hard_cap = int(os.getenv("ARTICLEREADY_ARTICLE_HARD_OUTPUT_CAP", "60000") or 60000)
+    return max(2500, min(estimated, default_cap, hard_cap))
+
+
+def _article_token_estimate(payload: dict[str, Any], source_records: list[dict[str, Any]], length_plan: dict[str, Any]) -> dict[str, Any]:
+    """Estimate token demand for pricing and status reporting."""
+    target_words = int(length_plan.get("target_words") or 7000)
+    output_tokens = int(round(target_words * 1.35))
+    input_chars = 0
+    for key in [
+        "thesis_source_material", "previous_sections", "continuation_material", "author_guidelines", "data_and_results",
+        "research_problem", "objectives", "theory_or_framework", "variables_constructs", "key_findings", "references_notes",
+    ]:
+        input_chars += len(str(payload.get(key) or ""))
+    input_chars += sum(len(str(record.get("title") or "")) + len(str(record.get("abstract") or "")) + 250 for record in source_records)
+    base_prompt_tokens = 4500
+    input_tokens_single = int(round(input_chars / 4)) + base_prompt_tokens
+    batches = len(length_plan.get("sections") or []) if _should_batch_draft(payload, length_plan) else 1
+    if batches > 1:
+        # Batch mode repeats the core context for each section, but section targets keep output controlled.
+        input_tokens = int(round(input_tokens_single * min(batches, 8) * 0.55))
+    else:
+        input_tokens = input_tokens_single
+    return {
+        "target_words": target_words,
+        "estimated_output_tokens": output_tokens,
+        "estimated_input_tokens": max(1000, input_tokens),
+        "estimated_total_tokens": max(1000, input_tokens) + output_tokens,
+        "drafting_passes": batches,
+        "pricing_note": "Estimate only. Actual usage depends on source context, uploaded material, tables, equations, references and model response length.",
+    }
+
+
+def _call_responses_api(
+    client: Any,
+    *,
+    model: str,
+    instructions: str,
+    prompt: dict[str, Any],
+    max_output_tokens: int,
+    fallback_model: str = "",
+) -> tuple[str, str, list[str]]:
+    return _call_openai_response_with_fallback(
+        client,
+        primary_model=model,
+        fallback_model=fallback_model,
+        instructions=instructions,
+        input_payload=json.dumps(prompt, ensure_ascii=False, indent=2),
+        max_output_tokens=max_output_tokens,
+    )
+
+
+def _draft_article_in_batches(
+    client: Any,
+    *,
+    model: str,
+    base_prompt: dict[str, Any],
+    instructions: str,
+    length_plan: dict[str, Any],
+    payload: dict[str, Any],
+) -> tuple[str, str, list[str], list[str]]:
+    """Draft a long article section by section and return article, instrument, warnings and models used."""
+    sections = list(length_plan.get("sections") or []) or _default_article_sections(payload, int(length_plan.get("target_words") or 7000))
+    generated_sections: list[str] = []
+    warnings: list[str] = []
+    models_used: list[str] = []
+    prior_outline = ""
+    for index, section in enumerate(sections, start=1):
+        section_prompt = dict(base_prompt)
+        section_prompt["task"] = "Draft one section of a longer publishable journal article."
+        section_prompt["batch_drafting"] = {
+            "enabled": True,
+            "current_section_number": index,
+            "total_sections": len(sections),
+            "current_section": section,
+            "all_sections": sections,
+            "previous_section_headings_already_drafted": prior_outline,
+            "rules": [
+                "Write only the current section. Do not repeat earlier sections.",
+                "Use the exact current section heading unless journal guidance requires a minor wording adjustment.",
+                "Keep citations, tables, equations and author-action placeholders valid within this section.",
+                "Do not add final References unless this is the last planned section or the current section explicitly asks for references.",
+                "If this is the last planned section, include References and Source Use Audit where needed.",
+                "Respect the selected writing stage. Stage 1 stops at Methods and readiness guidance.",
+            ],
+        }
+        section_words = int(section.get("target_words") or max(500, int(length_plan.get("target_words") or 7000) / len(sections)))
+        section_prompt["article_length_and_structure"] = {**length_plan, "current_section_target_words": section_words}
+        try:
+            raw, used_model, attempt_notes = _call_responses_api(
+                client,
+                model=model,
+                fallback_model=os.getenv("OPENAI_ARTICLE_TERRA_MODEL", "gpt-5.6-terra"),
+                instructions=instructions,
+                prompt=section_prompt,
+                max_output_tokens=_max_output_tokens_for_article(section_words, section_batch=True),
+            )
+            warnings.extend(attempt_notes)
+            if used_model and used_model not in models_used:
+                models_used.append(used_model)
+            section_text, _instrument = _split_draft_package(raw)
+            section_text = _strip_code_fences(section_text or raw)
+            if section_text:
+                generated_sections.append(section_text.strip())
+                prior_outline += f"\n- {section.get('heading', 'Section')}"
+            else:
+                warnings.append(f"Batch section {index} returned no text.")
+        except Exception as exc:
+            warnings.append(f"Batch section {index} failed: {str(exc)[:180]}")
+    article_text = "\n\n".join(part for part in generated_sections if part.strip())
+    return article_text, "", warnings, models_used
 
 def _prepare_workflow_payload(payload: dict[str, Any]) -> dict[str, Any]:
     prepared = dict(payload)
@@ -1691,11 +2164,15 @@ def _enforce_initial_scope(text: str) -> str:
 
 def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
     payload = _prepare_workflow_payload(dict(payload))
-    payload["thesis_source_material"] = str(payload.get("thesis_source_material") or "")[:50000]
-    payload["previous_sections"] = str(payload.get("previous_sections") or "")[:70000]
-    payload["continuation_material"] = str(payload.get("continuation_material") or "")[:70000]
-    payload["author_guidelines"] = str(payload.get("author_guidelines") or "")[:18000]
-    payload["data_and_results"] = str(payload.get("data_and_results") or "")[:50000]
+    material_limit = int(os.getenv("ARTICLEREADY_ARTICLE_MATERIAL_CHARS", "120000") or 120000)
+    continuation_limit = int(os.getenv("ARTICLEREADY_ARTICLE_CONTINUATION_CHARS", "140000") or 140000)
+    guideline_limit = int(os.getenv("ARTICLEREADY_AUTHOR_GUIDELINE_CHARS", "30000") or 30000)
+    data_limit = int(os.getenv("ARTICLEREADY_ARTICLE_DATA_CHARS", "120000") or 120000)
+    payload["thesis_source_material"] = str(payload.get("thesis_source_material") or "")[:material_limit]
+    payload["previous_sections"] = str(payload.get("previous_sections") or "")[:continuation_limit]
+    payload["continuation_material"] = str(payload.get("continuation_material") or "")[:continuation_limit]
+    payload["author_guidelines"] = str(payload.get("author_guidelines") or "")[:guideline_limit]
+    payload["data_and_results"] = str(payload.get("data_and_results") or "")[:data_limit]
     if not str(payload.get("article_title") or "").strip():
         raise ValueError("Article title or working topic is required.")
     if payload["draft_stage"] == "continuation_after_results" and not (
@@ -1705,6 +2182,8 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
 
     sources, blocked, search_result = _search_sources(payload)
     source_records = _source_context(sources)
+    length_plan = _article_length_structure_requirements(payload)
+    token_estimate = _article_token_estimate(payload, source_records, length_plan)
     resources = payload.get("research_resources") or {}
     if payload.get("include_research_resource_search", True) and not (resources.get("data_sources") or resources.get("instrument_sources")):
         resources = discover_research_resources(
@@ -1714,11 +2193,12 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
             include_live_search=bool(payload.get("include_source_search", True)),
         )
     payload["research_route"] = infer_research_route(payload)
-    model = _select_article_model(str(payload.get("academic_level") or ""), str(payload.get("article_type") or ""))
+    model = _select_article_model(str(payload.get("academic_level") or ""), str(payload.get("article_type") or ""), payload)
     client = _safe_get_openai_client()
     provider_errors = list(search_result.get("provider_errors") or []) if isinstance(search_result, dict) else []
     provider_errors.extend(resources.get("provider_errors") or [])
     instrument_text = ""
+    model_used = "none"
 
     if not client or os.getenv("ARTICLEREADY_ARTICLE_USE_AI", "1").strip().lower() in {"0", "false", "no"}:
         article_text = _fallback_article(payload, sources, resources)
@@ -1727,6 +2207,7 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
     else:
         current_year = datetime.now().year
         quality_pack = _article_prompt_quality_pack(payload)
+        quality_pack["article_length_and_structure_requirements"] = length_plan
         article_inputs = {key: value for key, value in payload.items() if key not in {"source_bank", "retrieved_sources", "research_resources"}}
         article_inputs["attached_source_count"] = int(search_result.get("attached_source_count") or 0)
         article_inputs["automatic_source_count"] = int(search_result.get("automatic_source_count") or 0)
@@ -1757,9 +2238,13 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
             "source_records": source_records,
             "research_resource_guidance": resources,
             "quality_pack": quality_pack,
+            "article_length_and_structure": length_plan,
+            "token_budget_estimate": token_estimate,
             "stage_rules": stage_rules,
             "strict_rules": [
-                "Use supplied target-journal guidance as structural rules. If absent, use an article structure appropriate to the article type and current stage.",
+                "Use supplied target-journal guidance and article_length_and_structure as structural rules. If absent, use an article structure appropriate to the article type and current stage.",
+                "Respect the target word range and section allocation. A 7,000-9,000 word article must be developed as a full manuscript, not as a short protocol outline.",
+                "When user-supplied article_structure is provided, follow it closely and preserve all requested sections unless the selected stage forbids them.",
                 "Treat an independent article as a new study, not as a disguised thesis extraction. Thesis, dissertation and project fields are intentionally blank in independent mode.",
                 "Do not guarantee publication and do not fabricate evidence, results, citations, permissions, ethics approvals, data access or declarations.",
                 "Use bracketed attention placeholders for missing details.",
@@ -1784,30 +2269,49 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
                 "Do not wrap the response in code fences.",
             ],
         }
+        instructions = (
+            "You are ArticleReady AI's senior disciplinary professor and journal editor for the user's exact research field. Respect the selected stage. "
+            "Write with expert conceptual judgement, rigorous method fit and publication-level analytical precision without claiming a professorial identity in the manuscript. "
+            "Use no future tense. Stage 1 methods use present tense, and completed work uses past tense. "
+            "Place every unresolved author action, permission check, missing evidence item, additional-analysis need or next-stage instruction inside one [Author action: ...] bracket. "
+            "Attach verified citations closely to substantive claims and never pad the text with weak or irrelevant sources. "
+            "Apply the supplied strong human-supervised academic writing layer: use natural sentence-length variation, varied paragraph openings, "
+            "precise disciplinary language and evidence-led reasoning while preserving citations, technical terms, tables, equations and placeholders. "
+            "Do not add deliberate errors, unrelated tangents, or commentary about AI detection or humanisation. "
+            "For a new independent study, stop the article body at Methods and provide data-source or instrument guidance without inventing access or validated items. "
+            "For Stage 2, use the uploaded previous sections and results to complete the manuscript."
+        )
         try:
-            response = client.responses.create(
-                model=model,
-                instructions=(
-                    "You are ArticleReady AI's senior disciplinary professor and journal editor for the user's exact research field. Respect the selected stage. "
-                    "Write with expert conceptual judgement, rigorous method fit and publication-level analytical precision without claiming a professorial identity in the manuscript. "
-                    "Use no future tense. Stage 1 methods use present tense, and completed work uses past tense. "
-                    "Place every unresolved author action, permission check, missing evidence item, additional-analysis need or next-stage instruction inside one [Author action: ...] bracket. "
-                    "Attach verified citations closely to substantive claims and never pad the text with weak or irrelevant sources. "
-                    "Apply the supplied strong human-supervised academic writing layer: use natural sentence-length variation, varied paragraph openings, "
-                    "precise disciplinary language and evidence-led reasoning while preserving citations, technical terms, tables, equations and placeholders. "
-                    "Do not add deliberate errors, unrelated tangents, or commentary about AI detection or humanisation. "
-                    "For a new independent study, stop the article body at Methods and provide data-source or instrument guidance without inventing access or validated items. "
-                    "For Stage 2, use the uploaded previous sections and results to complete the manuscript."
-                ),
-                input=json.dumps(prompt, ensure_ascii=False, indent=2),
-            )
-            raw_text = _extract_text(response)
-            article_text, instrument_text = _split_draft_package(raw_text)
+            if _should_batch_draft(payload, length_plan):
+                article_text, instrument_text, batch_warnings, batch_models = _draft_article_in_batches(
+                    client,
+                    model=model,
+                    base_prompt=prompt,
+                    instructions=instructions,
+                    length_plan=length_plan,
+                    payload=payload,
+                )
+                provider_errors.extend(batch_warnings)
+                model_used = ", ".join(batch_models) if batch_models else model
+                if payload.get("include_instrument_draft") and not instrument_text:
+                    instrument_text = _fallback_instrument(payload, resources)
+                mode = "ai_batch_draft"
+            else:
+                raw_text, model_used, attempt_notes = _call_responses_api(
+                    client,
+                    model=model,
+                    fallback_model=os.getenv("OPENAI_ARTICLE_FALLBACK_MODEL", ""),
+                    instructions=instructions,
+                    prompt=prompt,
+                    max_output_tokens=_max_output_tokens_for_article(int(length_plan.get("target_words") or 7000)),
+                )
+                provider_errors.extend(attempt_notes)
+                article_text, instrument_text = _split_draft_package(raw_text)
+                if payload.get("include_instrument_draft") and not instrument_text:
+                    instrument_text = _fallback_instrument(payload, resources)
+                mode = "ai_draft"
             if not article_text:
                 article_text = _fallback_article(payload, sources, resources)
-            if payload.get("include_instrument_draft") and not instrument_text:
-                instrument_text = _fallback_instrument(payload, resources)
-            mode = "ai_draft"
         except Exception as exc:
             provider_errors.append(f"OpenAI article drafting failed: {str(exc)[:180]}")
             article_text = _fallback_article(payload, sources, resources)
@@ -1818,14 +2322,15 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
     instrument_text = _finalise_article_text(instrument_text) if instrument_text else ""
     if payload["draft_stage"] == "initial_to_methods":
         article_text = _enforce_initial_scope(article_text)
-    if mode == "ai_draft":
-        article_text = _apply_strong_article_humanisation(
+
+    humanizer_report: dict[str, Any] = {"mode": _humanizer_mode(), "applied": False}
+    humanizer_models: list[str] = []
+    if mode in {"ai_draft", "ai_batch_draft"}:
+        article_text, humanizer_report, humanizer_models = _humanize_article_with_model(
+            client,
             article_text,
-            seed_text="|".join([
-                str(payload.get("article_title") or ""),
-                str(payload.get("article_type") or ""),
-                str(payload.get("draft_stage") or ""),
-            ]),
+            payload=payload,
+            provider_errors=provider_errors,
         )
         article_text = _finalise_article_text(article_text)
 
@@ -1840,7 +2345,7 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
         "academic_level_used": payload.get("academic_level") or "PhD",
         "research_route": payload.get("research_route") or "undetermined",
         "research_resources": resources,
-        "model_used": model if client else "none",
+        "model_used": model_used if client else "none",
         "mode": mode,
         "source_records_used": source_records,
         "attached_source_count": int(search_result.get("attached_source_count") or 0),
@@ -1852,13 +2357,20 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
         "provider_errors": provider_errors,
         "reference_depth_guidance": _article_reference_expectations(str(payload.get("article_type") or "")),
         "citation_density_report": citation_density,
+        "article_length_plan": length_plan,
+        "token_budget_estimate": token_estimate,
+        "batch_drafting_applied": mode == "ai_batch_draft",
+        "drafting_passes": token_estimate.get("drafting_passes", 1),
         "expert_professor_standard_applied": True,
         "future_tense_guard_applied": True,
         "author_action_bracketing_applied": True,
-        "strong_humanisation_applied": mode == "ai_draft" and _strong_humanisation_enabled(),
+        "strong_humanisation_applied": mode in {"ai_draft", "ai_batch_draft"} and _strong_humanisation_enabled(),
         "humanisation_strength": _humanisation_strength(),
+        "humanizer_report": humanizer_report,
+        "humanizer_models_used": humanizer_models,
         "quality_filters": [
             "The strong human-supervised writing layer varies sentence rhythm, paragraph shape and wording without changing confirmed evidence or article structure.",
+            "Long-article mode allows user-controlled word targets and section structures, with batch drafting used automatically for long manuscripts unless single-pass mode is selected.",
             "Independent-article mode disables thesis, dissertation and project source fields.",
             "Stage 1 stops the article body at Methods. Stage 2 requires previous sections and completed results or analysis.",
             "Candidate secondary datasets and instruments must be checked for fit, access, permission and validity.",
