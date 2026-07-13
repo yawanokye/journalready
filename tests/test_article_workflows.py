@@ -381,3 +381,54 @@ def test_article_docx_renders_markdown_and_red_actions():
         and str(run.font.color.rgb) == "C00000"
         for run in runs
     )
+
+
+def test_long_article_length_plan_and_token_estimate(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    result = draft_journal_article(
+        {
+            "article_title": "Graduate employability and talent pipelines",
+            "article_type": "Empirical research article",
+            "include_source_search": False,
+            "word_limit": "7000-9000",
+            "target_word_count": 8000,
+            "long_write_mode": "batch",
+            "article_structure": "Introduction 1200\nLiterature review and hypotheses 1800\nMethods 1400\nResults 1400\nDiscussion 1600\nConclusion 600",
+            "thesis_source_material": "Completed study summary with results.",
+        }
+    )
+    assert result["article_length_plan"]["target_words"] == 8000
+    assert result["article_length_plan"]["structure_source"] == "user_supplied"
+    assert result["token_budget_estimate"]["target_words"] == 8000
+    assert result["token_budget_estimate"]["drafting_passes"] >= 2
+    assert result["batch_drafting_applied"] is False  # no API key, so fallback text is used
+
+
+def test_gpt56_terra_sol_model_routing(monkeypatch):
+    from app.article_service import _select_article_model
+    monkeypatch.setenv('OPENAI_ARTICLE_TERRA_MODEL', 'gpt-5.6-terra')
+    monkeypatch.setenv('OPENAI_ARTICLE_SOL_MODEL', 'gpt-5.6-sol')
+    assert _select_article_model('Bachelors', 'Empirical research article', {'target_word_count': 7000}) == 'gpt-5.6-terra'
+    assert _select_article_model('Research Masters (e.g. MPhil)', 'Empirical research article', {'target_word_count': 7000}) == 'gpt-5.6-sol'
+    assert _select_article_model('Bachelors', 'Systematic review article', {'target_word_count': 7000}) == 'gpt-5.6-sol'
+    assert _select_article_model('Bachelors', 'Empirical research article', {'target_word_count': 11000}) == 'gpt-5.6-sol'
+    monkeypatch.delenv('OPENAI_ARTICLE_TERRA_MODEL', raising=False)
+    monkeypatch.setenv('OPENAI_ARTICLE_BACHELOR_MODEL', 'gpt-5.4')
+    assert _select_article_model('Bachelors', 'Empirical research article', {'target_word_count': 7000}) == 'gpt-5.6-terra'
+
+
+def test_thesisready_humanizer_preserves_scholarly_evidence():
+    from app.scholarly_humanizer import humanize_scholarly_text, validate_humanizer_preservation
+    original = (
+        '# Discussion\n\n'
+        'The evidence indicates that procurement digitisation is associated with transparency (Adam, 2024). '
+        'The coefficient is 0.42 and the p-value is 0.01. [Author action: Confirm the robustness specification.]\n\n'
+        '## References\n\nAdam, A. (2024). Digital procurement evidence. https://doi.org/10.1000/example'
+    )
+    candidate, report = humanize_scholarly_text(original, mode='balanced')
+    valid, issues = validate_humanizer_preservation(original, candidate, max_word_change_ratio=0.06)
+    assert valid, issues
+    assert '(Adam, 2024)' in candidate
+    assert '0.42' in candidate and '0.01' in candidate
+    assert '[Author action: Confirm the robustness specification.]' in candidate
+    assert report['mode'] == 'balanced'
