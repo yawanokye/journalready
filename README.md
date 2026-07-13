@@ -184,3 +184,20 @@ ArticleReady AI includes a one-off package payment system similar to ProjectRead
 Set `ARTICLEREADY_PAYMENT_REQUIRED=1` in production. For local testing, set it to `0`.
 
 See `PAYMENT_SYSTEM_UPDATE.md` for plan keys, checkout routes, entitlement rules and required environment variables.
+
+
+## Restricted developer access
+
+ArticleReady AI includes a signed, time-limited developer session for testing paid workflows without consuming customer entitlements. It is disabled by default.
+
+Configure it in Render with:
+
+```text
+ARTICLEREADY_DEVELOPER_ACCESS_ENABLED=1
+ARTICLEREADY_DEVELOPER_ACCESS_EMAIL=developer@example.com
+ARTICLEREADY_DEVELOPER_ACCESS_CODE_SHA256=<sha256-of-your-private-code>
+ARTICLEREADY_DEVELOPER_ACCESS_SECRET=<long-random-signing-secret>
+ARTICLEREADY_DEVELOPER_SESSION_HOURS=12
+```
+
+Open `/developer-access`, enter the configured email and private code, and activate the session. The browser receives a signed token that is accepted for Article Ideas, Article Writer, Revision and DOCX export. Developer sessions do not create purchases or consume customer entitlements. Keep the access page, code and signing secret private.

@@ -55,6 +55,16 @@ services:
         sync: false
       - key: ARTICLEREADY_PAYSTACK_USD_TO_GHS_RATE
         value: "15.00"
+      - key: ARTICLEREADY_DEVELOPER_ACCESS_ENABLED
+        value: "0"
+      - key: ARTICLEREADY_DEVELOPER_ACCESS_EMAIL
+        sync: false
+      - key: ARTICLEREADY_DEVELOPER_ACCESS_CODE_SHA256
+        sync: false
+      - key: ARTICLEREADY_DEVELOPER_ACCESS_SECRET
+        sync: false
+      - key: ARTICLEREADY_DEVELOPER_SESSION_HOURS
+        value: "12"
 
 # Long article and batch writing optional environment variables:
 # ARTICLEREADY_BATCH_DRAFT_WORD_THRESHOLD=6500
