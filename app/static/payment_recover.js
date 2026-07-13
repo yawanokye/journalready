@@ -23,11 +23,11 @@
         body: JSON.stringify({email, purchase_id: purchaseId}),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Paid access could not be restored.');
+      if (!response.ok) throw new Error(ArticleReadyPayments.errorMessage(data.detail ?? data, 'Paid access could not be restored.'));
       ArticleReadyPayments.remember(data);
       status.textContent = data.message || 'Paid access restored on this device.';
     } catch (error) {
-      status.textContent = error.message || 'Paid access could not be restored.';
+      status.textContent = ArticleReadyPayments.errorMessage(error, 'Paid access could not be restored.');
     } finally {
       button.disabled = false;
     }

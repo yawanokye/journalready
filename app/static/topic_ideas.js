@@ -1,4 +1,38 @@
 const $ = (id) => document.getElementById(id);
+function apiErrorMessage(value, fallback = "The request could not be completed.") {
+  if (value == null) return fallback;
+  if (typeof value === "string") return value.trim() || fallback;
+  if (value instanceof Error) return apiErrorMessage(value.message, fallback);
+  if (Array.isArray(value)) {
+    const messages = value.map(item => apiErrorMessage(item, "")).filter(Boolean);
+    return messages.length ? messages.join("; ") : fallback;
+  }
+  if (typeof value === "object") {
+    if (typeof value.msg === "string") {
+      const location = Array.isArray(value.loc) ? value.loc.filter(x => x !== "body").join(" → ") : "";
+      return `${location ? `${location}: ` : ""}${value.msg}`;
+    }
+    for (const key of ["message", "detail", "error", "reason", "description", "errors"]) {
+      if (value[key] != null) {
+        const message = apiErrorMessage(value[key], "");
+        if (message) return message;
+      }
+    }
+    try {
+      const serialised = JSON.stringify(value);
+      if (serialised && serialised !== "{}") return serialised;
+    } catch (_) {}
+  }
+  const text = String(value || "").trim();
+  return text && text !== "[object Object]" ? text : fallback;
+}
+
+async function readApiResponse(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try { return JSON.parse(text); } catch (_) { return {detail: text}; }
+}
+
 let lastResult = null;
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[ch]));
 const val = (id) => ($(id)?.value || "").trim();
@@ -156,9 +190,9 @@ async function generate(event) {
   try {
     const headers = {"Content-Type":"application/json", ...(window.ArticleReadyPayments ? ArticleReadyPayments.paymentHeaders('article_ideas') : {})};
     const response = await fetch("/api/article-ideas", {method:"POST", headers, body:JSON.stringify(payload())});
-    const body = await response.json();
+    const body = await readApiResponse(response);
     if (response.status === 402 && window.ArticleReadyPayments) { ArticleReadyPayments.openFromApi(body.detail || {}); return; }
-    if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : (body.detail?.message || response.statusText));
+    if (!response.ok) throw new Error(apiErrorMessage(body.detail ?? body, response.statusText || `Request failed (${response.status})`));
     lastResult = body;
     renderIdeas(body);
     renderResources(body);
@@ -173,7 +207,7 @@ async function generate(event) {
     } else {
       $("status").textContent = `Ideas generated. ${excluded ? `${excluded} weak or unrelated scholarly record(s) were excluded.` : ""}`;
     }
-  } catch (error) { $("status").textContent = `Error: ${error.message}`; }
+  } catch (error) { $("status").textContent = `Error: ${apiErrorMessage(error, "Article ideas could not be generated.")}`; }
   finally { $("generateBtn").disabled = false; }
 }
 

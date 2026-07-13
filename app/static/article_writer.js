@@ -1,4 +1,38 @@
 const $ = (id) => document.getElementById(id);
+function apiErrorMessage(value, fallback = "The request could not be completed.") {
+  if (value == null) return fallback;
+  if (typeof value === "string") return value.trim() || fallback;
+  if (value instanceof Error) return apiErrorMessage(value.message, fallback);
+  if (Array.isArray(value)) {
+    const messages = value.map(item => apiErrorMessage(item, "")).filter(Boolean);
+    return messages.length ? messages.join("; ") : fallback;
+  }
+  if (typeof value === "object") {
+    if (typeof value.msg === "string") {
+      const location = Array.isArray(value.loc) ? value.loc.filter(x => x !== "body").join(" → ") : "";
+      return `${location ? `${location}: ` : ""}${value.msg}`;
+    }
+    for (const key of ["message", "detail", "error", "reason", "description", "errors"]) {
+      if (value[key] != null) {
+        const message = apiErrorMessage(value[key], "");
+        if (message) return message;
+      }
+    }
+    try {
+      const serialised = JSON.stringify(value);
+      if (serialised && serialised !== "{}") return serialised;
+    } catch (_) {}
+  }
+  const text = String(value || "").trim();
+  return text && text !== "[object Object]" ? text : fallback;
+}
+
+async function readApiResponse(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try { return JSON.parse(text); } catch (_) { return {detail: text}; }
+}
+
 const val = (id) => ($(id)?.value || "").trim();
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[ch]));
 const SOURCE_STORAGE_KEY = "articleready_attached_source_bank_v1";
@@ -235,15 +269,15 @@ async function findSources() {
   $("sourceStatus").textContent = "Searching scholarly metadata and attaching relevant records...";
   try {
     const response = await fetch("/api/articles/find-sources", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(sourceSearchPayload())});
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.detail || response.statusText);
+    const body = await readApiResponse(response);
+    if (!response.ok) throw new Error(apiErrorMessage(body.detail ?? body, response.statusText || `Request failed (${response.status})`));
     latestSourceSearchResult = body;
     attachedSourceBank = mergeSourceBank(attachedSourceBank, body.source_bank || body.sources || []);
     persistSources(); renderAttachedSummary(); renderLatestSearch(body);
     const warnings = (body.provider_errors || []).length;
     const excluded = Number(body.excluded_retracted_count || 0);
     $("sourceStatus").textContent = `Attached ${body.source_bank_count || body.count || 0} record(s). The bank now contains ${attachedSourceBank.length}. ${excluded ? `${excluded} unsafe record(s) were excluded. ` : ""}${warnings ? `${warnings} provider(s) could not be reached.` : ""}`;
-  } catch (error) { $("sourceStatus").textContent = `Source search error: ${error.message}`; }
+  } catch (error) { $("sourceStatus").textContent = `Source search error: ${apiErrorMessage(error, "Source search failed.")}`; }
   finally { $("findSourcesBtn").disabled = false; }
 }
 
@@ -253,12 +287,12 @@ async function findResources() {
   $("resourceStatus").textContent = "Searching for possible data sources and instrument records...";
   try {
     const response = await fetch("/api/articles/research-resources", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(researchResourcePayload())});
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.detail || response.statusText);
+    const body = await readApiResponse(response);
+    if (!response.ok) throw new Error(apiErrorMessage(body.detail ?? body, response.statusText || `Request failed (${response.status})`));
     renderResearchResources(body);
     const warnings = (body.provider_errors || []).length;
     $("resourceStatus").textContent = `Resource guidance generated for ${body.research_route_label || body.research_route}. ${warnings ? `${warnings} scholarly provider warning(s) occurred.` : "Verify access, permission and fit before use."}`;
-  } catch (error) { $("resourceStatus").textContent = `Resource search error: ${error.message}`; }
+  } catch (error) { $("resourceStatus").textContent = `Resource search error: ${apiErrorMessage(error, "Research-resource search failed.")}`; }
   finally { $("findResourcesBtn").disabled = false; }
 }
 
@@ -274,8 +308,8 @@ async function extractFiles(inputId, targetId, label) {
   for (const file of files) {
     const form = new FormData(); form.append("file", file);
     const response = await fetch("/api/articles/extract-file", {method:"POST", body:form});
-    const body = await response.json();
-    if (!response.ok) throw new Error(`${file.name}: ${body.detail || response.statusText}`);
+    const body = await readApiResponse(response);
+    if (!response.ok) throw new Error(`${file.name}: ${apiErrorMessage(body.detail ?? body, response.statusText || `Request failed (${response.status})`)}`);
     chunks.push(`\n\n[Uploaded file: ${body.filename}]\n${body.text}`);
   }
   const existing = val(targetId);
@@ -296,9 +330,9 @@ async function draft(event) {
     const planKey = window.ArticleReadyPayments ? ArticleReadyPayments.selectedDraftPlan() : '';
     const headers = {"Content-Type":"application/json", ...(window.ArticleReadyPayments ? ArticleReadyPayments.paymentHeaders(planKey) : {})};
     const response = await fetch("/api/articles/draft", {method:"POST", headers, body:JSON.stringify(payload())});
-    const body = await response.json();
+    const body = await readApiResponse(response);
     if (response.status === 402 && window.ArticleReadyPayments) { ArticleReadyPayments.openFromApi(body.detail || {}); return; }
-    if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : (body.detail?.message || response.statusText));
+    if (!response.ok) throw new Error(apiErrorMessage(body.detail ?? body, response.statusText || `Request failed (${response.status})`));
     lastText = body.article_text || "";
     lastInstrumentText = body.instrument_text || "";
     $("articleOutput").value = lastText;
@@ -314,7 +348,7 @@ async function draft(event) {
         : "Article draft completed.";
     $("status").textContent = `${completionMessage} ${warnings ? `Review ${warnings} warning(s).` : "Review all red author-action items, citations and evidence."}`;
     $("copyBtn").disabled = !lastText; $("downloadBtn").disabled = !lastText;
-  } catch (error) { $("status").textContent = `Error: ${error.message}`; }
+  } catch (error) { $("status").textContent = `Error: ${apiErrorMessage(error, "Article drafting failed.")}`; }
   finally { $("draftBtn").disabled = false; }
 }
 
@@ -331,10 +365,10 @@ async function downloadContent(text, title, filename) {
     const planKey = window.ArticleReadyPayments ? ArticleReadyPayments.selectedDraftPlan() : '';
     const headers = {"Content-Type":"application/json", ...(window.ArticleReadyPayments ? ArticleReadyPayments.paymentHeaders(planKey) : {})};
     const response = await fetch("/api/articles/export", {method:"POST", headers, body:JSON.stringify({article_title:title, article_text:text})});
-    if (response.status === 402 && window.ArticleReadyPayments) { const data = await response.json().catch(() => ({})); ArticleReadyPayments.openFromApi(data.detail || {}); return; }
-    if (!response.ok) { let detail = response.statusText; try { const data = await response.json(); detail = typeof data.detail === 'string' ? data.detail : (data.detail?.message || detail); } catch (_) {} throw new Error(detail); }
+    if (response.status === 402 && window.ArticleReadyPayments) { const data = await readApiResponse(response); ArticleReadyPayments.openFromApi(data.detail || {}); return; }
+    if (!response.ok) { const data = await readApiResponse(response); throw new Error(apiErrorMessage(data.detail ?? data, response.statusText || `Request failed (${response.status})`)); }
     const blob = await response.blob(); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); $("status").textContent = "DOCX downloaded.";
-  } catch (error) { $("status").textContent = `Export error: ${error.message}`; }
+  } catch (error) { $("status").textContent = `Export error: ${apiErrorMessage(error, "Article export failed.")}`; }
 }
 
 function clearAll() {
@@ -356,8 +390,8 @@ window.addEventListener("DOMContentLoaded", () => {
   $("findSourcesBtn").addEventListener("click", findSources);
   $("clearSourcesBtn").addEventListener("click", clearAttachedSources);
   $("findResourcesBtn").addEventListener("click", findResources);
-  $("extractPreviousBtn").addEventListener("click", async () => { try { await extractFiles("previousSectionsFiles", "previousSections", "previous-section"); } catch (error) { $("uploadStatus").textContent = `Upload error: ${error.message}`; } });
-  $("extractResultsBtn").addEventListener("click", async () => { try { await extractFiles("resultsFiles", "continuationMaterial", "results or analysis"); } catch (error) { $("uploadStatus").textContent = `Upload error: ${error.message}`; } });
+  $("extractPreviousBtn").addEventListener("click", async () => { try { await extractFiles("previousSectionsFiles", "previousSections", "previous-section"); } catch (error) { $("uploadStatus").textContent = `Upload error: ${apiErrorMessage(error, "File extraction failed.")}`; } });
+  $("extractResultsBtn").addEventListener("click", async () => { try { await extractFiles("resultsFiles", "continuationMaterial", "results or analysis"); } catch (error) { $("uploadStatus").textContent = `Upload error: ${apiErrorMessage(error, "File extraction failed.")}`; } });
   $("copyBtn").addEventListener("click", () => copyContent($("articleOutput").value || lastText, "Article draft"));
   $("downloadBtn").addEventListener("click", () => downloadContent($("articleOutput").value || lastText, val("articleTitle") || "Journal Article Draft", "journal_article_draft.docx"));
   $("copyInstrumentBtn").addEventListener("click", () => copyContent($("instrumentOutput").value || lastInstrumentText, "Instrument draft"));

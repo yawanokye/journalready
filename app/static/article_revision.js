@@ -1,3 +1,37 @@
+function apiErrorMessage(value, fallback = "The request could not be completed.") {
+  if (value == null) return fallback;
+  if (typeof value === "string") return value.trim() || fallback;
+  if (value instanceof Error) return apiErrorMessage(value.message, fallback);
+  if (Array.isArray(value)) {
+    const messages = value.map(item => apiErrorMessage(item, "")).filter(Boolean);
+    return messages.length ? messages.join("; ") : fallback;
+  }
+  if (typeof value === "object") {
+    if (typeof value.msg === "string") {
+      const location = Array.isArray(value.loc) ? value.loc.filter(x => x !== "body").join(" → ") : "";
+      return `${location ? `${location}: ` : ""}${value.msg}`;
+    }
+    for (const key of ["message", "detail", "error", "reason", "description", "errors"]) {
+      if (value[key] != null) {
+        const message = apiErrorMessage(value[key], "");
+        if (message) return message;
+      }
+    }
+    try {
+      const serialised = JSON.stringify(value);
+      if (serialised && serialised !== "{}") return serialised;
+    } catch (_) {}
+  }
+  const text = String(value || "").trim();
+  return text && text !== "[object Object]" ? text : fallback;
+}
+
+async function readApiResponse(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try { return JSON.parse(text); } catch (_) { return {detail: text}; }
+}
+
 const byId = (id) => document.getElementById(id);
 
 const form = byId('revisionForm');
@@ -39,12 +73,12 @@ async function extractFile(fileInput, target, label) {
   uploadStatus.textContent = `Extracting ${file.name}…`;
   try {
     const response = await fetch('/api/articles/extract-file', { method: 'POST', body });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || 'File extraction failed.');
+    const data = await readApiResponse(response);
+    if (!response.ok) throw new Error(apiErrorMessage(data.detail ?? data, 'File extraction failed.'));
     target.value = target.value.trim() ? `${target.value.trim()}\n\n${data.text}` : data.text;
     uploadStatus.textContent = `${file.name} extracted, ${Number(data.character_count || 0).toLocaleString()} characters${data.truncated ? ', truncated to the extraction limit' : ''}.`;
   } catch (error) {
-    uploadStatus.textContent = error.message || 'File extraction failed.';
+    uploadStatus.textContent = apiErrorMessage(error, 'File extraction failed.');
   }
 }
 
@@ -108,9 +142,9 @@ form.addEventListener('submit', async (event) => {
       headers: { 'Content-Type': 'application/json', ...(window.ArticleReadyPayments ? ArticleReadyPayments.paymentHeaders(planKey) : {}) },
       body: JSON.stringify(payload),
     });
-    const data = await response.json();
+    const data = await readApiResponse(response);
     if (response.status === 402 && window.ArticleReadyPayments) { ArticleReadyPayments.openFromApi(data.detail || {}); return; }
-    if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : (data.detail?.message || 'Article revision failed.'));
+    if (!response.ok) throw new Error(apiErrorMessage(data.detail ?? data, 'Article revision failed.'));
     lastResult = data;
     revisedArticle.value = data.revised_article_text || '';
     revisionReport.value = data.revision_report || '';
@@ -123,7 +157,7 @@ form.addEventListener('submit', async (event) => {
     enableOutputs(Boolean(revisedArticle.value.trim()));
     message(errors.length ? `Revision completed with ${errors.length} provider warning(s). Review the report before using the manuscript.` : 'Revision completed. Review the manuscript, report and any suggested analyses before downloading.');
   } catch (error) {
-    message(error.message || 'Article revision failed.', 'error');
+    message(apiErrorMessage(error, 'Article revision failed.'), 'error');
   } finally {
     setBusy(false);
   }
@@ -162,13 +196,13 @@ downloadRevisionBtn.addEventListener('click', async () => {
       }),
     });
     if (response.status === 402 && window.ArticleReadyPayments) {
-      const data = await response.json().catch(() => ({}));
+      const data = await readApiResponse(response);
       ArticleReadyPayments.openFromApi(data.detail || {});
       return;
     }
     if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      throw new Error(typeof data.detail === 'string' ? data.detail : (data.detail?.message || 'Revision export failed.')); 
+      const data = await readApiResponse(response);
+      throw new Error(apiErrorMessage(data.detail ?? data, 'Revision export failed.')); 
     }
     const blob = await response.blob();
     const disposition = response.headers.get('Content-Disposition') || '';
@@ -184,7 +218,7 @@ downloadRevisionBtn.addEventListener('click', async () => {
     URL.revokeObjectURL(url);
     message('DOCX downloaded. Added or changed wording is blue, while exact unchanged wording remains black.');
   } catch (error) {
-    message(error.message || 'Revision export failed.', 'error');
+    message(apiErrorMessage(error, 'Revision export failed.'), 'error');
   } finally {
     downloadRevisionBtn.disabled = false;
   }

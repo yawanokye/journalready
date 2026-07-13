@@ -1,5 +1,39 @@
 (function () {
+
+  function errorMessage(value, fallback = 'The request could not be completed.') {
+    if (value == null) return fallback;
+    if (typeof value === 'string') return value.trim() || fallback;
+    if (value instanceof Error) return errorMessage(value.message, fallback);
+    if (Array.isArray(value)) {
+      const messages = value.map(item => errorMessage(item, '')).filter(Boolean);
+      return messages.length ? messages.join('; ') : fallback;
+    }
+    if (typeof value === 'object') {
+      if (typeof value.msg === 'string') {
+        const location = Array.isArray(value.loc) ? value.loc.filter(x => x !== 'body').join(' → ') : '';
+        return `${location ? `${location}: ` : ''}${value.msg}`;
+      }
+      for (const key of ['message', 'detail', 'error', 'reason', 'description', 'errors']) {
+        if (value[key] != null) {
+          const message = errorMessage(value[key], '');
+          if (message) return message;
+        }
+      }
+      try {
+        const serialised = JSON.stringify(value);
+        if (serialised && serialised !== '{}') return serialised;
+      } catch (_) {}
+    }
+    const text = String(value || '').trim();
+    return text && text !== '[object Object]' ? text : fallback;
+  }
+  async function readResponse(response) {
+    const text = await response.text();
+    if (!text) return {};
+    try { return JSON.parse(text); } catch (_) { return {detail: text}; }
+  }
   const STORAGE_KEY = 'articleready_paid_access_v1';
+  const DEVELOPER_STORAGE_KEY = 'articleready_developer_access_v1';
   const PLAN_NAMES = {
     article_ideas: 'Article Ideas',
     stage1_article: 'Stage 1 Article Builder',
@@ -10,6 +44,46 @@
     reviewer_comment_revision: 'Reviewer Comment Revision',
     extra_revision_pass: 'Extra Revision Pass',
   };
+
+
+  function readDeveloperAccess() {
+    try {
+      const value = JSON.parse(localStorage.getItem(DEVELOPER_STORAGE_KEY) || '{}') || {};
+      if (!value.developer_token || !value.expires_at || Number(value.expires_at) * 1000 <= Date.now()) {
+        localStorage.removeItem(DEVELOPER_STORAGE_KEY);
+        return null;
+      }
+      return value;
+    } catch (_) {
+      localStorage.removeItem(DEVELOPER_STORAGE_KEY);
+      return null;
+    }
+  }
+  function rememberDeveloperAccess(access) {
+    if (!access?.developer_token || !access?.expires_at) return;
+    localStorage.setItem(DEVELOPER_STORAGE_KEY, JSON.stringify({
+      developer_token: access.developer_token,
+      expires_at: access.expires_at,
+      email: access.email || '',
+      saved_at: new Date().toISOString(),
+    }));
+  }
+  function clearDeveloperAccess() { localStorage.removeItem(DEVELOPER_STORAGE_KEY); }
+  async function developerStatus() {
+    const record = readDeveloperAccess();
+    if (!record) return {ok: false, active: false, message: 'Developer access is inactive.'};
+    const response = await fetch('/api/developer/status', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({developer_token: record.developer_token}),
+    });
+    const data = await readResponse(response);
+    if (!response.ok || !data.active) {
+      clearDeveloperAccess();
+      return {ok: false, active: false, message: errorMessage(data.detail ?? data, 'Developer access is inactive or expired.')};
+    }
+    return data;
+  }
 
   function readStore() {
     try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') || {}; } catch (_) { return {}; }
@@ -32,15 +106,39 @@
   }
   function credentials(preferredPlan) {
     const store = readStore();
-    return (preferredPlan && store[preferredPlan]) || store.latest || null;
+    if (preferredPlan) return store[preferredPlan] || null;
+    return store.latest || null;
+  }
+  function credentialsByPurchaseId(purchaseId) {
+    const wanted = String(purchaseId || '').trim();
+    if (!wanted) return null;
+    const store = readStore();
+    for (const record of Object.values(store)) {
+      if (record && typeof record === 'object' && String(record.purchase_id || '') === wanted && record.access_token) return record;
+    }
+    return null;
+  }
+  async function entitlementStatus(record) {
+    if (!record?.purchase_id || !record?.access_token) return {ok: false, active: false, message: 'Paid access credentials are unavailable on this device.'};
+    const response = await fetch('/api/payments/entitlement-status', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({purchase_id: record.purchase_id, access_token: record.access_token}),
+    });
+    const data = await readResponse(response);
+    if (!response.ok) return {ok: false, active: false, message: errorMessage(data.detail ?? data, 'Paid access could not be checked.')};
+    return data;
   }
   function paymentHeaders(preferredPlan) {
+    const headers = {};
+    const developer = readDeveloperAccess();
+    if (developer?.developer_token) headers['x-articleready-developer-token'] = developer.developer_token;
     const c = credentials(preferredPlan);
-    if (!c) return {};
-    return {
-      'x-articleready-purchase-id': c.purchase_id,
-      'x-articleready-access-token': c.access_token,
-    };
+    if (c) {
+      headers['x-articleready-purchase-id'] = c.purchase_id;
+      headers['x-articleready-access-token'] = c.access_token;
+    }
+    return headers;
   }
   function workIdFromPage() {
     const title = document.getElementById('articleTitle')?.value || document.getElementById('researchArea')?.value || document.title || 'general';
@@ -105,18 +203,19 @@
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({plan_key: pendingPlan, user_email: email, billing_country: country, module_key: pendingModule, work_id: workIdFromPage(), metadata: {page: location.pathname}}),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || response.statusText);
+      const data = await readResponse(response);
+      if (!response.ok) throw new Error(errorMessage(data.detail ?? data, response.statusText || `Checkout failed (${response.status})`));
       remember(data);
       if (!data.checkout_url) throw new Error('Checkout URL was not returned.');
       window.location.href = data.checkout_url;
     } catch (error) {
-      status.textContent = error.message || 'Checkout could not be started.';
+      status.textContent = errorMessage(error, 'Checkout could not be started.');
     }
   }
   function openFromApi(detail) {
-    const plan = detail?.recommended_plan || 'standard_full_article';
-    openCheckout(plan, {message: detail?.message || `${PLAN_NAMES[plan] || 'This package'} is required to continue.`});
+    const normalised = detail && typeof detail === 'object' && !Array.isArray(detail) ? detail : {};
+    const plan = normalised.recommended_plan || 'standard_full_article';
+    openCheckout(plan, {message: errorMessage(normalised.message || normalised.detail, `${PLAN_NAMES[plan] || 'This package'} is required to continue.`)});
   }
   function selectedDraftPlan() {
     const stage = document.getElementById('draftStage')?.value || 'full_article';
@@ -137,9 +236,9 @@
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({handoff}),
     });
-    const data = await response.json().catch(() => ({}));
+    const data = await readResponse(response);
     if (!response.ok) {
-      const detail = typeof data.detail === 'string' ? data.detail : (data.detail?.message || 'Paid access could not be restored.');
+      const detail = errorMessage(data.detail ?? data, 'Paid access could not be restored.');
       throw new Error(detail);
     }
     remember(data);
@@ -152,18 +251,29 @@
     const target = document.getElementById('paymentStatus') || document.getElementById('status') || document.querySelector('.status');
     if (payment === 'success') {
       const handoff = params.get('handoff') || '';
-      if (target) target.textContent = handoff ? 'Payment confirmed. Restoring paid access...' : 'Payment confirmed.';
-      if (handoff) {
-        try {
-          await redeemPaymentHandoff(handoff);
+      const purchaseId = params.get('purchase_id') || '';
+      if (target) target.textContent = 'Payment confirmed. Checking paid access...';
+      try {
+        // The checkout page stores an opaque credential before redirecting to the provider.
+        // After payment, verify that credential first. This avoids rotating a valid token
+        // unnecessarily and prevents a lost network response from stranding paid access.
+        const existing = credentialsByPurchaseId(purchaseId);
+        const existingStatus = existing ? await entitlementStatus(existing) : {active: false};
+        if (existingStatus.active) {
+          remember({...existing, plan_key: existingStatus.plan_key || existing.plan_key});
           if (target) target.textContent = 'Payment confirmed. Paid access is ready for the selected ArticleReady package.';
-        } catch (error) {
-          if (target) target.textContent = `Payment was received, but automatic access restoration failed. ${error.message || 'Contact support with the Purchase ID shown in the return URL.'}`;
+        } else if (handoff) {
+          const restored = await redeemPaymentHandoff(handoff);
+          const restoredStatus = await entitlementStatus(restored);
+          if (!restoredStatus.active) throw new Error(restoredStatus.message || 'The paid package is not active yet.');
+          if (target) target.textContent = 'Payment confirmed. Paid access is ready for the selected ArticleReady package.';
+        } else if (target) {
+          target.textContent = params.get('handoff_status') === 'recovery_required'
+            ? 'Payment was received, but access restoration requires recovery. Use the payment recovery page with this Purchase ID.'
+            : 'Payment was received, but the browser could not confirm the paid access credential. Use Payment Recovery.';
         }
-      } else if (target) {
-        target.textContent = params.get('handoff_status') === 'recovery_required'
-          ? 'Payment was received, but access restoration requires support. Keep the Purchase ID from this return.'
-          : 'Payment confirmed. Paid access is ready.';
+      } catch (error) {
+        if (target) target.textContent = `Payment was received, but automatic access restoration failed. ${errorMessage(error, 'Use Payment Recovery with the Purchase ID shown in the return URL.')}`;
       }
     }
     if (payment === 'failed' && target) target.textContent = 'Payment could not be confirmed. Try again or check your payment dashboard.';
@@ -178,6 +288,14 @@
     selectedDraftPlan,
     selectedRevisionPlan,
     redeemPaymentHandoff,
+    errorMessage,
+    readResponse,
+    credentials,
+    entitlementStatus,
+    readDeveloperAccess,
+    rememberDeveloperAccess,
+    clearDeveloperAccess,
+    developerStatus,
   };
   window.addEventListener('DOMContentLoaded', checkReturnStatus);
 })();
