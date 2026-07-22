@@ -242,7 +242,7 @@ function payload() {
     contribution: val("contribution"), references_notes: val("referencesNotes"), instrument_requirements: val("instrumentRequirements"),
     include_instrument_draft: Boolean($("includeInstrumentDraft")?.checked), word_limit: val("wordLimit"),
     target_word_count: Number(val("targetWordCount") || 0) || null, article_structure: val("articleStructure"), long_write_mode: val("longWriteMode") || "auto",
-    citation_style: val("citationStyle"),
+    citation_style: val("citationStyle"), humanizer_mode: val("humanizerMode") || "balanced",
     include_source_search: Boolean($("includeSourceSearch")?.checked), include_older_foundational: Boolean($("includeOlderFoundational")?.checked),
     include_research_resource_search: Boolean($("includeResourceSearch")?.checked), source_search_terms: latestSourceSearchResult?.query || val("sourceSearchQuery"),
     source_bank: attachedSourceBank, research_resources: latestResearchResources || {},
@@ -306,7 +306,12 @@ function renderDraftSources(result) {
   const tokenEstimate = result.token_budget_estimate || {};
   const tokenNote = tokenEstimate.estimated_total_tokens ? ` Estimated drafting tokens: about ${Number(tokenEstimate.estimated_total_tokens).toLocaleString()} across ${tokenEstimate.drafting_passes || 1} pass(es).` : "";
   const batchNote = result.batch_drafting_applied ? " Batch drafting was applied for this long manuscript." : "";
-  $("draftSourceSummary").innerHTML = sources.length ? `<strong>${sources.length} source records supplied to the drafting workflow.</strong> ${attachedCount} came from the pre-draft attached bank and ${automaticCount} were found automatically. This doesn’t mean every record was cited.${tokenNote}${batchNote}` : `No source records were supplied to this draft.${tokenNote}${batchNote}`;
+  const density = result.citation_density_report || {};
+  const densityValue = Number(density.citation_occurrences_per_1000_words || 0);
+  const densityNote = density.word_count ? ` Citation density: ${densityValue.toFixed(1)} per 1,000 words, minimum ${Number(density.minimum_target || 0)}, preferred ${Number(density.preferred_target || 0)}.` : "";
+  const humanizer = result.humanizer_report || {};
+  const humanizerNote = humanizer.mode ? ` Humanizer: ${esc(humanizer.mode)}${humanizer.model_pass_applied ? " with preservation-gated model pass" : ""}.` : "";
+  $("draftSourceSummary").innerHTML = sources.length ? `<strong>${sources.length} source records supplied to the drafting workflow.</strong> ${attachedCount} came from the pre-draft attached bank and ${automaticCount} were found automatically. This doesn’t mean every record was cited.${tokenNote}${batchNote}${densityNote}${humanizerNote}` : `No source records were supplied to this draft.${tokenNote}${batchNote}${densityNote}${humanizerNote}`;
   $("sources").innerHTML = sources.length ? sources.map((src, index) => sourceCard(src, index, false)).join("") : `<p class="muted">No source records were available.</p>`;
 }
 
@@ -316,7 +321,8 @@ async function findSources() {
   $("findSourcesBtn").disabled = true;
   $("sourceStatus").textContent = "Searching scholarly metadata and attaching relevant records...";
   try {
-    const response = await fetch("/api/articles/find-sources", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(sourceSearchPayload())});
+    const searchOptions = {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(sourceSearchPayload())};
+    const response = window.ArticleReadyPayments ? await ArticleReadyPayments.authorisedFetch("/api/articles/find-sources", searchOptions) : await fetch("/api/articles/find-sources", searchOptions);
     const body = await readApiResponse(response);
     if (!response.ok) throw new Error(apiErrorMessage(body.detail ?? body, response.statusText || `Request failed (${response.status})`));
     latestSourceSearchResult = body;
@@ -377,7 +383,9 @@ async function draft(event) {
   try {
     const planKey = window.ArticleReadyPayments ? ArticleReadyPayments.selectedDraftPlan() : '';
     const headers = {"Content-Type":"application/json", ...(window.ArticleReadyPayments ? ArticleReadyPayments.paymentHeaders(planKey) : {})};
-    const response = await fetch("/api/articles/draft", {method:"POST", headers, body:JSON.stringify(payload())});
+    const response = window.ArticleReadyPayments
+      ? await ArticleReadyPayments.authorisedFetch("/api/articles/draft", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload())}, planKey)
+      : await fetch("/api/articles/draft", {method:"POST", headers, body:JSON.stringify(payload())});
     const body = await readApiResponse(response);
     if (response.status === 402 && window.ArticleReadyPayments) { ArticleReadyPayments.openFromApi(body.detail || {}); return; }
     if (!response.ok) throw new Error(apiErrorMessage(body.detail ?? body, response.statusText || `Request failed (${response.status})`));
@@ -420,7 +428,7 @@ async function downloadContent(text, title, filename) {
 }
 
 function clearAll() {
-  $("articleForm").reset(); $("wordLimit").value = "7000-9000"; $("targetWordCount").value = "8000"; $("longWriteMode").value = "auto"; $("articleStructure").value = ""; $("draftStage").value = "full_article"; $("academicLevel").value = "Research Masters (e.g. MPhil)"; $("researchRoute").value = "Auto";
+  $("articleForm").reset(); $("wordLimit").value = "7000-9000"; $("targetWordCount").value = "8000"; $("longWriteMode").value = "auto"; $("humanizerMode").value = "balanced"; $("articleStructure").value = ""; $("draftStage").value = "full_article"; $("academicLevel").value = "Research Masters (e.g. MPhil)"; $("researchRoute").value = "Auto";
   $("articleOutput").value = ""; $("instrumentOutput").value = ""; $("instrumentOutputPanel").hidden = true; $("instrumentRequirementsLabel").hidden = true; $("filters").innerHTML = ""; $("sources").innerHTML = ""; $("draftSourceSummary").innerHTML = ""; $("status").textContent = "";
   $("copyBtn").disabled = true; $("downloadBtn").disabled = true; lastText = ""; lastInstrumentText = ""; latestResearchResources = null; renderResearchResources(null); clearAttachedSources(); applyWorkflowState(false, false);
 }

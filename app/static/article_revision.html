@@ -38,7 +38,7 @@
 
         <h2>2. Revision direction</h2>
         <div class="two-cols">
-          <label><span class="field-label">Article type</span><select id="articleType"><option>Empirical research article</option><option>Systematic review</option><option>Scoping review</option><option>Conceptual article</option><option>Methodological article</option><option>Case study article</option><option>Policy or practice article</option><option>Short communication</option></select></label>
+          <label><span class="field-label">Article type</span><select id="articleType"><option>Empirical research article</option><option>Systematic review</option><option>Scoping review</option><option>Conceptual article</option><option>Bibliometric article</option><option>Methodological article</option><option>Case study article</option><option>Policy or practice article</option><option>Short communication</option></select></label>
           <label><span class="field-label">Revision level</span><select id="revisionLevel"><option>Language and clarity polish</option><option>Substantive scholarly revision</option><option selected>Publication-readiness overhaul</option></select></label>
         </div>
         <div class="two-cols">
@@ -52,6 +52,7 @@
           <label><span class="field-label">Word limit</span><input id="wordLimit" placeholder="e.g. 7,000 words"></label>
           <label><span class="field-label">Citation style</span><select id="citationStyle"><option>APA 7th</option><option>Harvard</option><option>Chicago author-date</option><option>Vancouver</option><option>IEEE</option><option>Journal-specific style</option></select></label>
         </div>
+        <label><span class="field-label">Scholarly humanizer</span><select id="humanizerMode"><option value="balanced" selected>Balanced, evidence-preserving naturalness</option><option value="deep">Deep, section-by-section naturalness pass</option><option value="light">Light, deterministic language clean-up</option><option value="off">Off, preserve the revised wording</option></select><span class="help">Balanced is recommended. Deep applies the ThesisReady-style preservation-gated pass more broadly.</span></label>
         <label><span class="field-label">Methodology currently used</span><textarea id="methodology" rows="4" placeholder="Describe the design, sample, measurement, analysis and robustness procedures used."></textarea></label>
         <label><span class="field-label">Confirmed data, results or analysis evidence</span><textarea id="dataResults" rows="5" placeholder="Paste or summarise the actual findings, tables, coefficients, themes, diagnostics and robustness results. The app will not invent missing output."></textarea></label>
         <label><span class="field-label">Current contribution claim</span><textarea id="contributionClaim" rows="3" placeholder="What does the article currently claim to contribute?"></textarea></label>
@@ -109,7 +110,7 @@
   </main>
 
   <footer class="footer">ArticleReady AI, publication development with author verification.</footer>
-  <script src="/static/article_revision.js?v=20260713-developer-access"></script>
-  <script src="/static/articleready_payments.js?v=20260713-developer-access"></script>
+  <script src="/static/articleready_payments.js?v=20260722-humanizer-citations-docx"></script>
+  <script src="/static/article_revision.js?v=20260722-humanizer-citations-docx"></script>
 </body>
 </html>

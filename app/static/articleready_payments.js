@@ -140,6 +140,17 @@
     }
     return headers;
   }
+
+  async function authorisedFetch(url, options = {}, preferredPlan = '') {
+    const requestOptions = {...options};
+    requestOptions.headers = {
+      ...(options.headers || {}),
+      ...paymentHeaders(preferredPlan),
+    };
+    requestOptions.credentials = options.credentials || 'same-origin';
+    return fetch(url, requestOptions);
+  }
+
   function workIdFromPage() {
     const title = document.getElementById('articleTitle')?.value || document.getElementById('researchArea')?.value || document.title || 'general';
     return String(title).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'general';
@@ -282,6 +293,7 @@
   }
   window.ArticleReadyPayments = {
     paymentHeaders,
+    authorisedFetch,
     openCheckout,
     openFromApi,
     remember,

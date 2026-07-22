@@ -34,7 +34,7 @@
           <label><span class="field-label">Study context</span><input id="context" placeholder="Country, sector, population, organisation, or period"></label>
         </div>
         <div class="two-cols">
-          <label><span class="field-label">Preferred article type</span><select id="articleType"><option>Empirical research article</option><option>Systematic review</option><option>Scoping review</option><option>Conceptual article</option><option>Methodological article</option><option>Case study article</option><option>Policy or practice article</option><option>Short communication</option></select></label>
+          <label><span class="field-label">Preferred article type</span><select id="articleType"><option>Empirical research article</option><option>Systematic review</option><option>Scoping review</option><option>Conceptual article</option><option>Bibliometric article</option><option>Methodological article</option><option>Case study article</option><option>Policy or practice article</option><option>Short communication</option></select></label>
           <label><span class="field-label">Likely research route</span><select id="researchRoute"><option>Auto</option><option>Secondary data or existing dataset</option><option>Primary survey or questionnaire</option><option>Qualitative interviews or focus groups</option><option>Mixed methods</option><option>Experimental research</option><option>Review or conceptual research</option></select></label>
         </div>
         <div class="two-cols">
@@ -57,7 +57,7 @@
       </form>
 
       <section class="card">
-        <div class="result-head"><div><h2>2. Proposed article portfolio</h2><p class="help">Each idea includes a research route and candidate data or instrument resources where applicable.</p></div><div class="output-actions"><button id="copyBtn" disabled>Copy all</button></div></div>
+        <div class="result-head"><div><h2>2. Proposed article portfolio</h2><p class="help">Each idea includes a research route and candidate data or instrument resources where applicable.</p></div><div class="output-actions"><button id="copyBtn" disabled>Copy all</button><button id="exportIdeasBtn" class="secondary" disabled>Export DOCX</button></div></div>
         <div id="portfolioNote" class="warning" hidden></div>
         <div id="ideas" class="idea-list"><p class="muted">Generated article ideas will appear here.</p></div>
       </section>
@@ -72,7 +72,7 @@
 
     <section class="card" style="margin-top:22px"><h2>4. Relevant scholarly source records retained</h2><p class="help">Only records that pass the topic-relevance filter are shown. A shorter list is preferable to unrelated records. Verify every retained source before citing it.</p><div id="sources" class="source-grid"></div></section>
   </main>
-  <script src="/static/topic_ideas.js?v=20260713-developer-access"></script>
-  <script src="/static/articleready_payments.js?v=20260713-developer-access"></script>
+  <script src="/static/articleready_payments.js?v=20260722-humanizer-citations-docx"></script>
+  <script src="/static/topic_ideas.js?v=20260722-humanizer-citations-docx"></script>
 </body>
 </html>

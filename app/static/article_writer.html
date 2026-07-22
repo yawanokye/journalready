@@ -56,7 +56,7 @@
         <div class="source-search-panel" id="sourceSearchPanel">
           <div class="source-panel-head"><div><h3>Find and attach literature sources</h3><p class="help">Search open scholarly metadata. Attached records enrich the article only when directly relevant.</p></div><span id="attachedSourceBadge" class="source-count-badge">0 attached</span></div>
           <label><span class="field-label">Optional source search terms</span><textarea id="sourceSearchQuery" rows="2" placeholder="e.g. e-procurement public expenditure governance Africa"></textarea></label>
-          <div class="source-controls"><label class="compact-label"><span class="field-label">Maximum results</span><select id="sourceMaxResults"><option value="8">8</option><option value="12" selected>12</option><option value="20">20</option><option value="30">30</option></select></label><label class="check source-check"><input type="checkbox" id="includeOlderFoundational" checked> Include older foundational literature where relevant</label></div>
+          <div class="source-controls"><label class="compact-label"><span class="field-label">Maximum results</span><select id="sourceMaxResults"><option value="12">12</option><option value="20">20</option><option value="30">30</option><option value="40" selected>40</option><option value="60">60</option><option value="80">80</option></select></label><label class="check source-check"><input type="checkbox" id="includeOlderFoundational" checked> Include older foundational literature where relevant</label></div>
           <div class="actions compact-actions"><button id="findSourcesBtn" type="button" class="secondary">Find and attach sources</button><button id="clearSourcesBtn" type="button" class="ghost-button">Clear attached sources</button></div>
           <p id="sourceStatus" class="status"></p><div id="attachedSourceSummary" class="attached-summary">No literature records are attached yet.</div><div id="sourceSearchResults" class="source-grid compact-source-grid"></div>
         </div>
@@ -77,6 +77,7 @@
           <label><span class="field-label">Research depth</span><select id="academicLevel"><option>Bachelors</option><option>Non-Research Masters</option><option selected>Research Masters (e.g. MPhil)</option><option>Professional Doctorate (DBA, DEd)</option><option>PhD</option></select></label>
         </div>
         <div class="two-cols"><label><span class="field-label">Target word limit</span><input id="wordLimit" value="7000-9000" placeholder="e.g. 7000-9000"></label><label><span class="field-label">Citation style</span><select id="citationStyle"><option>APA 7th</option><option>Harvard</option><option>Chicago Author-Date</option><option>Vancouver</option><option>IEEE</option><option>AMA</option><option>Journal-specific style</option></select></label></div>
+        <label><span class="field-label">Scholarly humanizer</span><select id="humanizerMode"><option value="balanced" selected>Balanced, evidence-preserving naturalness</option><option value="deep">Deep, section-by-section naturalness pass</option><option value="light">Light, deterministic language clean-up</option><option value="off">Off, preserve the generated wording</option></select><span class="help">Balanced is recommended. Deep applies the ThesisReady-style preservation-gated model pass more broadly and may take longer.</span></label>
         <div class="long-write-panel">
           <div class="source-panel-head"><div><h3>Length and structure control</h3><p class="help">Use this for full journal articles, long articles, review papers or journal-specific structures. Batch mode develops the article section by section when the manuscript is long.</p></div><span class="source-count-badge" id="tokenEstimateBadge">Token estimate</span></div>
           <div class="two-cols"><label><span class="field-label">Target total words</span><input id="targetWordCount" type="number" min="1200" max="30000" step="100" value="8000"></label><label><span class="field-label">Long writing mode</span><select id="longWriteMode"><option value="auto" selected>Auto, use batch for long articles</option><option value="batch">Batch, section-by-section</option><option value="single_pass">Single pass</option></select></label></div>
@@ -121,7 +122,7 @@ Conclusion 600"></textarea></label>
 
     <section class="card" style="margin-top:22px"><h2>4. Source records supplied to the draft</h2><p class="help">Relevant records should appear in normal citations and in the Source Use Audit. Detected retracted or withdrawn records are excluded where metadata exposes their status.</p><div id="filters" class="idea-meta"></div><div id="draftSourceSummary" class="attached-summary"></div><div id="sources" class="source-grid"></div></section>
   </main>
-  <script src="/static/articleready_payments.js?v=20260722-full-synthesis"></script>
-  <script src="/static/article_writer.js?v=20260722-full-synthesis"></script>
+  <script src="/static/articleready_payments.js?v=20260722-humanizer-citations-docx"></script>
+  <script src="/static/article_writer.js?v=20260722-humanizer-citations-docx"></script>
 </body>
 </html>

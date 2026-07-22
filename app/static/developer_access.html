@@ -1,39 +1,26 @@
 <!doctype html>
-
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive">
   <title>Developer Access | ArticleReady AI</title>
-
-  <link
-    rel="stylesheet"
-    href="/static/styles.css?v=20260713-six-digit-access"
-  >
-  <link
-    rel="stylesheet"
-    href="/static/articleready_payments.css?v=20260713-six-digit-access"
-  >
+  <link rel="stylesheet" href="/static/styles.css?v=20260722-humanizer-citations-docx">
+  <link rel="stylesheet" href="/static/articleready_payments.css?v=20260722-humanizer-citations-docx">
 </head>
-
 <body>
   <header class="topbar">
     <a class="brand" href="/">
       <span class="brand-mark">AR</span>
       <span>ArticleReady AI</span>
     </a>
-
-```
-<nav class="nav" aria-label="Main navigation">
-  <a href="/">Home</a>
-  <a href="/topic-ideas">Article Topic Ideas</a>
-  <a href="/article-writer">Article Writer</a>
-  <a href="/article-revision">Article Revision</a>
-  <a href="/pricing">Pricing</a>
-</nav>
-```
-
+    <nav class="nav" aria-label="Main navigation">
+      <a href="/">Home</a>
+      <a href="/topic-ideas">Article Topic Ideas</a>
+      <a href="/article-writer">Article Writer</a>
+      <a href="/article-revision">Article Revision</a>
+      <a href="/pricing">Pricing</a>
+    </nav>
   </header>
 
   <main class="shell developer-shell">
@@ -46,122 +33,76 @@
           without consuming customer entitlements.
         </p>
       </div>
+      <aside class="hero-note">
+        <h2>Private use only</h2>
+        <p>
+          This access bypasses checkout and package usage limits while the
+          signed session remains valid.
+        </p>
+        <p class="muted">Do not share the developer code or browser session token.</p>
+      </aside>
+    </section>
 
-```
-  <aside class="hero-note">
-    <h2>Private use only</h2>
-    <p>
-      This access bypasses checkout and package usage limits while the
-      signed session remains valid.
-    </p>
-    <p class="muted">
-      Do not share the developer code or browser session token.
-    </p>
-  </aside>
-</section>
+    <section class="grid-two developer-grid">
+      <form id="developerAccessForm" class="card form-card" autocomplete="off">
+        <h2>Activate access</h2>
 
-<section class="grid-two developer-grid">
-  <form
-    id="developerAccessForm"
-    class="card form-card"
-    autocomplete="off"
-  >
-    <h2>Activate access</h2>
+        <label for="developerEmail">
+          <span class="field-label">Developer email</span>
+          <input
+            id="developerEmail"
+            name="developer_email"
+            type="email"
+            autocomplete="username"
+            placeholder="developer@example.com"
+            required
+          >
+        </label>
 
-    <label for="developerEmail">
-      <span class="field-label">Developer email</span>
-      <input
-        id="developerEmail"
-        name="developer_email"
-        type="email"
-        autocomplete="username"
-        placeholder="developer@example.com"
-        required
-      >
-    </label>
+        <label for="developerCode">
+          <span class="field-label">Developer access code *</span>
+          <input
+            id="developerCode"
+            name="developer_access_code"
+            type="password"
+            inputmode="numeric"
+            pattern="[0-9]{6}"
+            minlength="6"
+            maxlength="6"
+            autocomplete="one-time-code"
+            placeholder="Enter 6-digit code"
+            title="Enter the six-digit developer access code."
+            aria-describedby="developerCodeHelp"
+            required
+          >
+        </label>
+        <p id="developerCodeHelp" class="muted">
+          Enter the six-digit code configured for developer access.
+        </p>
 
-    <label for="developerCode">
-      <span class="field-label">Developer access code *</span>
-      <input
-        id="developerCode"
-        name="developer_access_code"
-        type="password"
-        inputmode="numeric"
-        pattern="[0-9]{6}"
-        minlength="6"
-        maxlength="6"
-        autocomplete="one-time-code"
-        placeholder="Enter 6-digit code"
-        title="Enter the six-digit developer access code."
-        aria-describedby="developerCodeHelp"
-        required
-      >
-    </label>
+        <div class="actions">
+          <button type="submit">Activate developer access</button>
+          <button id="developerLogoutBtn" class="secondary" type="button">End session</button>
+        </div>
+        <p id="developerStatus" class="status" role="status" aria-live="polite"></p>
+      </form>
 
-    <p id="developerCodeHelp" class="muted">
-      Enter the six-digit code configured for developer access.
-    </p>
-
-    <div class="actions">
-      <button type="submit">
-        Activate developer access
-      </button>
-
-      <button
-        id="developerLogoutBtn"
-        class="secondary"
-        type="button"
-      >
-        End session
-      </button>
-    </div>
-
-    <p
-      id="developerStatus"
-      class="status"
-      role="status"
-      aria-live="polite"
-    ></p>
-  </form>
-
-  <section class="card">
-    <h2>Session status</h2>
-
-    <div
-      id="developerSessionCard"
-      class="developer-session-card"
-    >
-      <p class="muted">
-        Checking this browser for an active developer session.
-      </p>
-    </div>
-
-    <div class="actions">
-      <a class="btn" href="/topic-ideas">
-        Test article ideas
-      </a>
-
-      <a class="btn secondary" href="/article-writer">
-        Test article writer
-      </a>
-
-      <a class="btn secondary" href="/article-revision">
-        Test revision
-      </a>
-    </div>
-  </section>
-</section>
-```
-
+      <section class="card">
+        <h2>Session status</h2>
+        <div id="developerSessionCard" class="developer-session-card">
+          <p class="muted">Checking this browser for an active developer session.</p>
+        </div>
+        <div class="actions">
+          <a class="btn" href="/topic-ideas">Test article ideas</a>
+          <a class="btn secondary" href="/article-writer">Test article writer</a>
+          <a class="btn secondary" href="/article-revision">Test revision</a>
+        </div>
+      </section>
+    </section>
   </main>
 
-  <footer class="footer">
-    ArticleReady AI developer access.
-  </footer>
-
-  <script src="/static/articleready_payments.js?v=20260713-six-digit-access"></script>
-
-  <script src="/static/developer_access.js?v=20260713-six-digit-access"></script>
-
+  <footer class="footer">ArticleReady AI developer access.</footer>
+  <script src="/static/articleready_payments.js?v=20260722-humanizer-citations-docx"></script>
+  <script src="/static/developer_access.js?v=20260722-humanizer-citations-docx"></script>
 </body>
 </html>

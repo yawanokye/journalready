@@ -95,6 +95,7 @@ function payloadFromForm() {
     author_guidelines: byId('authorGuidelines').value.trim(),
     article_type: byId('articleType').value,
     citation_style: byId('citationStyle').value,
+    humanizer_mode: byId('humanizerMode').value || 'balanced',
     word_limit: byId('wordLimit').value.trim(),
     research_area: byId('researchArea').value.trim(),
     context: byId('context').value.trim(),
@@ -137,11 +138,10 @@ form.addEventListener('submit', async (event) => {
   message('Revising the manuscript and assessing publication readiness…');
   try {
     const planKey = window.ArticleReadyPayments ? ArticleReadyPayments.selectedRevisionPlan() : '';
-    const response = await fetch('/api/articles/revise', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(window.ArticleReadyPayments ? ArticleReadyPayments.paymentHeaders(planKey) : {}) },
-      body: JSON.stringify(payload),
-    });
+    const requestOptions = {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)};
+    const response = window.ArticleReadyPayments
+      ? await ArticleReadyPayments.authorisedFetch('/api/articles/revise', requestOptions, planKey)
+      : await fetch('/api/articles/revise', requestOptions);
     const data = await readApiResponse(response);
     if (response.status === 402 && window.ArticleReadyPayments) { ArticleReadyPayments.openFromApi(data.detail || {}); return; }
     if (!response.ok) throw new Error(apiErrorMessage(data.detail ?? data, 'Article revision failed.'));
@@ -153,7 +153,11 @@ form.addEventListener('submit', async (event) => {
     copyMatrixBtn.disabled = reviewerMatrixPanel.hidden;
     const sourceCount = Number(data.source_bank_count || 0);
     const errors = Array.isArray(data.provider_errors) ? data.provider_errors.filter(Boolean) : [];
-    revisionMeta.innerHTML = `<strong>${data.mode === 'ai_revision' ? 'Revision completed' : 'Fallback output returned'}.</strong> ${sourceCount} scholarly record(s) passed to the revision workflow. ${data.revision_colour_note || ''}`;
+    const density = data.citation_density_report || {};
+    const densityNote = density.word_count ? ` Citation density: ${Number(density.citation_occurrences_per_1000_words || 0).toFixed(1)} per 1,000 words, minimum ${Number(density.minimum_target || 0)}, preferred ${Number(density.preferred_target || 0)}.` : '';
+    const humanizer = data.humanizer_report || {};
+    const humanizerNote = humanizer.mode ? ` Humanizer: ${humanizer.mode}${humanizer.model_pass_applied ? ' with preservation-gated model pass' : ''}.` : '';
+    revisionMeta.innerHTML = `<strong>${data.mode === 'ai_revision' ? 'Revision completed' : 'Fallback output returned'}.</strong> ${sourceCount} scholarly record(s) passed to the revision workflow.${densityNote}${humanizerNote} ${data.revision_colour_note || ''}`;
     enableOutputs(Boolean(revisedArticle.value.trim()));
     message(errors.length ? `Revision completed with ${errors.length} provider warning(s). Review the report before using the manuscript.` : 'Revision completed. Review the manuscript, report and any suggested analyses before downloading.');
   } catch (error) {
@@ -239,5 +243,6 @@ byId('clearBtn').addEventListener('click', () => {
   enableOutputs(false);
   copyMatrixBtn.disabled = true;
   byId('revisionLevel').value = 'Publication-readiness overhaul';
+  byId('humanizerMode').value = 'balanced';
   ['strengthenConceptualisation', 'strengthenContribution', 'assessMethodFit', 'assessAnalysis', 'deepenDiscussion', 'strengthenRecommendations', 'includeResponseMatrix', 'includeSourceSearch', 'includeOlderFoundational'].forEach((id) => { byId(id).checked = true; });
 });

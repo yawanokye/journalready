@@ -145,6 +145,7 @@ function renderIdeas(result) {
   $("portfolioNote").hidden = !note;
   $("portfolioNote").textContent = note;
   $("copyBtn").disabled = !ideas.length;
+  if ($("exportIdeasBtn")) $("exportIdeasBtn").disabled = !ideas.length;
 }
 
 function renderResources(result) {
@@ -188,8 +189,14 @@ async function generate(event) {
   $("status").textContent = "Developing focused article ideas and searching for feasible data or instrument resources...";
   $("generateBtn").disabled = true;
   try {
-    const headers = {"Content-Type":"application/json", ...(window.ArticleReadyPayments ? ArticleReadyPayments.paymentHeaders('article_ideas') : {})};
-    const response = await fetch("/api/article-ideas", {method:"POST", headers, body:JSON.stringify(payload())});
+    const requestOptions = {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "Accept": "application/json"},
+      body: JSON.stringify(payload()),
+    };
+    const response = window.ArticleReadyPayments
+      ? await ArticleReadyPayments.authorisedFetch("/api/article-ideas", requestOptions, "article_ideas")
+      : await fetch("/api/article-ideas", requestOptions);
     const body = await readApiResponse(response);
     if (response.status === 402 && window.ArticleReadyPayments) { ArticleReadyPayments.openFromApi(body.detail || {}); return; }
     if (!response.ok) throw new Error(apiErrorMessage(body.detail ?? body, response.statusText || `Request failed (${response.status})`));
@@ -223,6 +230,66 @@ function copyAll() {
   $("status").textContent = "Copied all article ideas and research-resource guidance.";
 }
 
+async function exportIdeasDocx() {
+  if (!lastResult || !(lastResult.ideas || []).length) {
+    $("status").textContent = "Generate article ideas before exporting.";
+    return;
+  }
+  const button = $("exportIdeasBtn");
+  if (button) button.disabled = true;
+  $("status").textContent = "Preparing the Article Topic Ideas DOCX...";
+  const current = payload();
+  const exportPayload = {
+    research_area: current.research_area,
+    source_mode: current.source_mode,
+    article_type: current.article_type,
+    target_journal: current.target_journal,
+    context: current.context,
+    portfolio_note: lastResult.portfolio_note || "",
+    ideas: lastResult.ideas || [],
+    research_resources: lastResult.research_resources || {},
+    source_records_used: lastResult.source_records_used || [],
+    quality_filters: lastResult.quality_filters || [],
+    provider_errors: lastResult.provider_errors || [],
+  };
+  try {
+    const requestOptions = {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "Accept": "application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/json"},
+      body: JSON.stringify(exportPayload),
+    };
+    const response = window.ArticleReadyPayments
+      ? await ArticleReadyPayments.authorisedFetch("/api/article-ideas/export", requestOptions, "article_ideas")
+      : await fetch("/api/article-ideas/export", requestOptions);
+    if (response.status === 402 && window.ArticleReadyPayments) {
+      const body = await readApiResponse(response);
+      ArticleReadyPayments.openFromApi(body.detail || {});
+      return;
+    }
+    if (!response.ok) {
+      const body = await readApiResponse(response);
+      throw new Error(apiErrorMessage(body.detail ?? body, `Export failed (${response.status})`));
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const match = disposition.match(/filename="?([^";]+)"?/i);
+    const filename = match ? match[1] : "article_topic_ideas.docx";
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    $("status").textContent = "Article Topic Ideas exported to DOCX.";
+  } catch (error) {
+    $("status").textContent = `Error: ${apiErrorMessage(error, "The DOCX could not be exported.")}`;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function clearAll() {
   $("ideaForm").reset();
   $("maxIdeas").value = "20";
@@ -237,6 +304,7 @@ function clearAll() {
   $("status").textContent = "";
   if ($("warningDetails")) { $("warningDetails").hidden = true; $("warningDetails").innerHTML = ""; }
   $("copyBtn").disabled = true;
+  if ($("exportIdeasBtn")) $("exportIdeasBtn").disabled = true;
   lastResult = null;
   syncSourceMode();
 }
@@ -244,6 +312,7 @@ function clearAll() {
 window.addEventListener("DOMContentLoaded", () => {
   $("ideaForm").addEventListener("submit", generate);
   $("copyBtn").addEventListener("click", copyAll);
+  if ($("exportIdeasBtn")) $("exportIdeasBtn").addEventListener("click", exportIdeasDocx);
   $("clearBtn").addEventListener("click", clearAll);
   $("sourceMode").addEventListener("change", syncSourceMode);
   syncSourceMode();
