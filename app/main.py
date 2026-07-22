@@ -21,7 +21,7 @@ STATIC_DIR = BASE_DIR / "static"
 app = FastAPI(
     title="ArticleReady AI",
     description="Journal article ideation, staged drafting, research-resource guidance, instrument planning, polishing and revision assistant.",
-    version="1.6.2",
+    version="1.6.3",
 )
 
 app.add_middleware(
