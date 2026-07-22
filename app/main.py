@@ -12,6 +12,8 @@ from app.routers import router
 from app.payments.api import api_router as payments_router
 from app.payments.store import init_payment_tables
 from app.developer_access import router as developer_access_router
+from app.review_workspace_api import router as review_workspace_router
+from app.review_workspace_store import init_review_workspace_tables
 
 load_dotenv()
 
@@ -20,8 +22,8 @@ STATIC_DIR = BASE_DIR / "static"
 
 app = FastAPI(
     title="ArticleReady AI",
-    description="Journal article ideation, staged drafting, research-resource guidance, instrument planning, polishing and revision assistant.",
-    version="1.8.0",
+    description="Journal article ideation, auditable review-evidence management, staged drafting, research-resource guidance, instrument planning, polishing and revision assistant.",
+    version="2.0.0",
 )
 
 app.add_middleware(
@@ -35,6 +37,7 @@ app.add_middleware(
 app.include_router(router)
 app.include_router(payments_router)
 app.include_router(developer_access_router)
+app.include_router(review_workspace_router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -42,7 +45,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 async def prevent_stale_payment_assets(request, call_next):
     response = await call_next(request)
     path = request.url.path.lower()
-    if path.endswith(".html") or path.endswith(".js") or path in {"/", "/topic-ideas", "/article-writer", "/article-revision", "/pricing", "/payment/recover", "/developer-access"}:
+    if path.endswith(".html") or path.endswith(".js") or path in {"/", "/topic-ideas", "/article-writer", "/article-revision", "/review-evidence", "/pricing", "/payment/recover", "/developer-access"}:
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
@@ -79,6 +82,11 @@ def article_revision_alias() -> FileResponse:
     return FileResponse(STATIC_DIR / "article_revision.html")
 
 
+@app.get("/review-evidence")
+def review_evidence_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "review_evidence.html")
+
+
 @app.get("/pricing")
 def pricing_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "pricing.html")
@@ -97,6 +105,7 @@ def developer_access_page() -> FileResponse:
 @app.on_event("startup")
 def startup() -> None:
     init_payment_tables()
+    init_review_workspace_tables()
 
 
 @app.get("/health")

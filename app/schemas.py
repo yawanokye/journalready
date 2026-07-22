@@ -11,6 +11,7 @@ ARTICLE_TYPES = (
     "Scoping review",
     "Conceptual article",
     "Bibliometric article",
+    "Integrative review",
     "Methodological article",
     "Case study article",
     "Policy or practice article",
@@ -167,6 +168,34 @@ class JournalArticleRequest(BaseModel):
     retrieved_sources: dict[str, Any] = Field(default_factory=dict)
     research_resources: dict[str, Any] = Field(default_factory=dict)
 
+    # Structured evidence-base and review-protocol documentation. These fields
+    # are optional for ordinary empirical articles and become active for
+    # systematic, scoping, conceptual, integrative and bibliometric articles.
+    include_review_protocol_package: bool = True
+    review_protocol_positioning: str = "Auto"
+    review_databases: str = ""
+    review_search_strings: str = ""
+    review_search_date: str = ""
+    review_date_limits: str = ""
+    review_language_limits: str = ""
+    review_document_types: str = ""
+    review_eligibility_criteria: str = ""
+    review_screening_process: str = ""
+    review_quality_appraisal: str = ""
+    review_citation_tracking: str = ""
+    review_duplicate_removal: str = ""
+    review_synthesis_method: str = ""
+    review_software: str = ""
+    review_protocol_notes: str = ""
+    review_records_identified: int | None = None
+    review_duplicates_removed: int | None = None
+    review_records_screened: int | None = None
+    review_records_excluded: int | None = None
+    review_full_text_assessed: int | None = None
+    review_full_text_excluded: int | None = None
+    review_citation_tracking_additions: int | None = None
+    review_final_corpus_size: int | None = None
+
     @field_validator("source_bank")
     @classmethod
     def validate_source_bank(cls, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -196,6 +225,22 @@ class JournalArticleRequest(BaseModel):
     def validate_humanizer_mode(cls, value: str) -> str:
         normalised = str(value or "balanced").strip().lower()
         return normalised if normalised in {"off", "light", "balanced", "deep"} else "balanced"
+
+    @field_validator(
+        "review_records_identified",
+        "review_duplicates_removed",
+        "review_records_screened",
+        "review_records_excluded",
+        "review_full_text_assessed",
+        "review_full_text_excluded",
+        "review_citation_tracking_additions",
+        "review_final_corpus_size",
+    )
+    @classmethod
+    def validate_review_counts(cls, value: int | None) -> int | None:
+        if value is None:
+            return None
+        return max(0, min(int(value), 10_000_000))
 
 
 class ArticleExportRequest(BaseModel):
@@ -263,3 +308,57 @@ class ArticleRevisionExportRequest(BaseModel):
     revision_report: str = ""
     reviewer_response_matrix: str = ""
     include_revision_report: bool = True
+
+
+class ReviewProjectCreateRequest(BaseModel):
+    title: str = Field(..., min_length=3, max_length=300)
+    article_type: str = "Systematic review"
+    review_question: str = ""
+    protocol_positioning: str = "Auto"
+    eligibility_criteria: str = ""
+    screening_process: str = ""
+    quality_appraisal: str = ""
+    synthesis_method: str = ""
+    software: str = ""
+    notes: str = ""
+
+
+class ReviewProjectUpdateRequest(BaseModel):
+    title: str | None = None
+    article_type: str | None = None
+    review_question: str | None = None
+    protocol_positioning: str | None = None
+    eligibility_criteria: str | None = None
+    screening_process: str | None = None
+    quality_appraisal: str | None = None
+    synthesis_method: str | None = None
+    software: str | None = None
+    notes: str | None = None
+    status: str | None = None
+
+
+class ReviewRecordUpdateRequest(BaseModel):
+    title_abstract_decision: str | None = None
+    title_abstract_reason: str | None = None
+    full_text_decision: str | None = None
+    full_text_reason: str | None = None
+    reviewer_notes: str | None = None
+    url: str | None = None
+
+
+class ReviewBulkDecisionRequest(BaseModel):
+    record_ids: list[str] = Field(default_factory=list)
+    stage: str
+    decision: str
+    reason: str = ""
+    notes: str = ""
+
+    @field_validator("record_ids")
+    @classmethod
+    def validate_record_ids(cls, value: list[str]) -> list[str]:
+        return [str(item).strip() for item in value if str(item).strip()][:500]
+
+
+class ReviewDuplicateDecisionRequest(BaseModel):
+    action: str
+    duplicate_of: str = ""

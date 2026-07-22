@@ -15,6 +15,7 @@ except Exception:  # pragma: no cover
     search_literature_sources = None
 
 from app.research_resources import discover_research_resources, infer_research_route
+from app.review_protocol import build_review_protocol_documentation
 from app.scholarly_humanizer import (
     analyse_scholarly_style,
     build_humanizer_batches,
@@ -2405,6 +2406,10 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
 
     sources, blocked, search_result = _search_sources(payload)
     source_records = _source_context(sources)
+    review_protocol_text, review_protocol_audit = build_review_protocol_documentation(
+        payload, search_result, source_records
+    )
+    payload["review_protocol_documentation"] = review_protocol_text
     length_plan = _article_length_structure_requirements(payload)
     token_estimate = _article_token_estimate(payload, source_records, length_plan)
     resources = payload.get("research_resources") or {}
@@ -2431,7 +2436,11 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
         current_year = datetime.now().year
         quality_pack = _article_prompt_quality_pack(payload)
         quality_pack["article_length_and_structure_requirements"] = length_plan
-        article_inputs = {key: value for key, value in payload.items() if key not in {"source_bank", "retrieved_sources", "research_resources"}}
+        article_inputs = {
+            key: value
+            for key, value in payload.items()
+            if key not in {"source_bank", "retrieved_sources", "research_resources", "review_protocol_documentation"}
+        }
         article_inputs["attached_source_count"] = int(search_result.get("attached_source_count") or 0)
         article_inputs["automatic_source_count"] = int(search_result.get("automatic_source_count") or 0)
         stage = payload["draft_stage"]
@@ -2470,6 +2479,8 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
             "current_year": current_year,
             "source_records": source_records,
             "research_resource_guidance": resources,
+            "review_protocol_documentation": review_protocol_text,
+            "review_protocol_audit": review_protocol_audit,
             "quality_pack": quality_pack,
             "article_length_and_structure": length_plan,
             "token_budget_estimate": token_estimate,
@@ -2480,6 +2491,10 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
                 "When user-supplied article_structure is provided, follow it closely and preserve all requested sections unless the selected stage forbids them.",
                 "Treat an independent article as a new study, not as a disguised thesis extraction. Thesis, dissertation and project fields are intentionally blank in independent mode.",
                 "Systematic, scoping, conceptual, theory-led and bibliometric articles may be drafted as full independent articles because their evidence base is literature or publication metadata rather than new primary data. Do not force these article types to stop at Methods.",
+                "Use review_protocol_documentation as the authoritative completion aid for review-method details. Integrate confirmed details into Methods, Conceptual Approach or Data and Bibliometric Methods rather than repeating one broad author-action paragraph.",
+                "Keep ArticleReady metadata discovery separate from formal database searching. Never report its source-bank count as records screened, included studies or the final corpus unless the user supplied and verified those figures independently.",
+                "For a conceptual article, preserve integrative theory-building positioning unless the user explicitly selects and documents a genuine systematic or scoping protocol.",
+                "When protocol details remain missing, use focused [Author action: ...] items for the specific missing field. Never invent databases, search strings, dates, reviewer numbers, screening decisions, quality scores, PRISMA counts, software settings or final corpus size.",
                 "Do not guarantee publication and do not fabricate evidence, results, citations, permissions, ethics approvals, data access or declarations.",
                 "Use bracketed attention placeholders for missing details.",
                 "Apply a relevance gate to all attached scholarly sources and research resources.",
@@ -2515,6 +2530,8 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
             "Do not add deliberate errors, unrelated tangents, or commentary about AI detection or humanisation. "
             "For a new independent empirical study, stop the article body at Methods and provide data-source or instrument guidance without inventing access or validated items. "
             "For a new independent systematic, scoping, conceptual or bibliometric article, draft the full article while keeping unsupplied screening, corpus and software outputs as [Author action: ...] items. "
+            "Use the supplied review protocol documentation to complete verified method details, but keep ArticleReady metadata discovery distinct from a formal systematic search and never invent record-flow counts. "
+            "For conceptual articles, retain integrative theory-building positioning unless a genuine systematic or scoping protocol is explicitly supplied. "
             "For Stage 2, use the uploaded previous sections and results to complete the manuscript."
         )
         try:
@@ -2554,6 +2571,9 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
             instrument_text = _fallback_instrument(payload, resources)
             mode = "metadata_fallback_after_ai_error"
 
+    if review_protocol_text and mode.startswith("metadata_fallback"):
+        article_text = f"{article_text.rstrip()}\n\n---\n\n{review_protocol_text}"
+
     article_text = _finalise_article_text(article_text)
     instrument_text = _finalise_article_text(instrument_text) if instrument_text else ""
     if payload["draft_stage"] == "initial_to_methods":
@@ -2585,6 +2605,8 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
         "academic_level_used": payload.get("academic_level") or "PhD",
         "research_route": payload.get("research_route") or "undetermined",
         "research_resources": resources,
+        "review_protocol_text": review_protocol_text,
+        "review_protocol_audit": review_protocol_audit,
         "model_used": model_used if client else "none",
         "mode": mode,
         "source_records_used": source_records,
@@ -2620,6 +2642,8 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
             "Future-tense constructions are converted to present or past tense before the article is returned.",
             "Author advice, missing information and required actions are consolidated into [Author action: ...] brackets for red DOCX formatting.",
             "Verified citations are placed close to the substantive claims they support, subject to source relevance and integrity checks.",
+            "Review-protocol and evidence-base documentation is generated separately for synthesis articles using confirmed inputs only.",
+            "ArticleReady metadata discovery remains distinct from formal database searching, screening and final-corpus counts.",
             "Missing article details are rendered as bracketed attention placeholders.",
         ],
     }
