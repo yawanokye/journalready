@@ -432,3 +432,66 @@ def test_thesisready_humanizer_preserves_scholarly_evidence():
     assert '0.42' in candidate and '0.01' in candidate
     assert '[Author action: Confirm the robustness specification.]' in candidate
     assert report['mode'] == 'balanced'
+
+
+def test_independent_systematic_review_can_generate_full_article(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    result = draft_journal_article(
+        {
+            "article_title": "Digital procurement governance: a systematic review",
+            "source_mode": "Develop as a new independent article",
+            "draft_stage": "full_article",
+            "article_type": "Systematic review",
+            "academic_level": "Research Masters (e.g. MPhil)",
+            "research_route": "Review, conceptual or bibliometric research",
+            "include_source_search": False,
+            "include_research_resource_search": False,
+        }
+    )
+    assert result["draft_stage"] == "full_article"
+    assert result["academic_level_used"] == "PhD"
+    assert "## 4. Evidence Synthesis" in result["article_text"]
+    assert "## 5. Discussion" in result["article_text"]
+    assert "Methods Readiness Checklist" not in result["article_text"]
+    assert "[Author action:" in result["article_text"]
+
+
+def test_independent_conceptual_article_can_generate_full_article(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    result = draft_journal_article(
+        {
+            "article_title": "A conceptual model of digital procurement capability",
+            "source_mode": "Develop as a new independent article",
+            "draft_stage": "full_article",
+            "article_type": "Conceptual article",
+            "include_source_search": False,
+            "include_research_resource_search": False,
+        }
+    )
+    assert result["draft_stage"] == "full_article"
+    assert "## 4. Integrative Framework and Propositions" in result["article_text"]
+    assert "## 5. Discussion and Contribution" in result["article_text"]
+    assert "## 5. Results" not in result["article_text"]
+
+
+def test_bibliometric_article_uses_full_synthesis_structure_and_plan():
+    from app.article_service import _article_kind, _article_length_structure_requirements, _default_article_sections, _prepare_workflow_payload, _should_batch_draft
+    from app.routers import _recommended_draft_plan
+
+    payload = {
+        "article_title": "Research fronts in digital procurement",
+        "source_mode": "Develop as a new independent article",
+        "draft_stage": "full_article",
+        "article_type": "Bibliometric article",
+        "target_word_count": 8000,
+    }
+    prepared = _prepare_workflow_payload(payload)
+    sections = _default_article_sections(prepared, 8000)
+    length_plan = _article_length_structure_requirements(prepared)
+
+    assert _article_kind("Bibliometric article") == "bibliometric_or_scientometric_article"
+    assert prepared["draft_stage"] == "full_article"
+    assert any("Science mapping" in section["heading"] for section in sections)
+    assert length_plan["batch_threshold_words"] == 9500
+    assert _should_batch_draft(prepared, length_plan) is False
+    assert _recommended_draft_plan(payload) == "review_conceptual_scoping"
