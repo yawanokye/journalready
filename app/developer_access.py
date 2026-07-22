@@ -22,7 +22,7 @@ _ATTEMPT_LOCK = threading.Lock()
 
 class DeveloperLoginRequest(BaseModel):
     email: str = Field(default="", max_length=254)
-    access_code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+    access_code: str = Field(min_length=8, max_length=512)
 
 
 class DeveloperStatusRequest(BaseModel):

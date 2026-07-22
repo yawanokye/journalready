@@ -318,7 +318,7 @@ def infer_research_route(payload: dict[str, Any], extra_text: str = "") -> str:
             return "qualitative_instrument"
         if "mixed" in explicit:
             return "mixed_methods"
-        if "review" in explicit or "conceptual" in explicit:
+        if "review" in explicit or "conceptual" in explicit or "bibliometric" in explicit or "scientometric" in explicit:
             return "review_or_conceptual"
         if "experiment" in explicit:
             return "experimental_instrument"
@@ -339,7 +339,7 @@ def infer_research_route(payload: dict[str, Any], extra_text: str = "") -> str:
         return "survey_or_scale"
     if any(term in text for term in ["interview", "focus group", "qualitative", "thematic analysis", "phenomenology", "grounded theory"]):
         return "qualitative_instrument"
-    if any(term in text for term in ["systematic review", "scoping review", "conceptual article", "literature review", "meta-analysis", "meta analysis"]):
+    if any(term in text for term in ["systematic review", "scoping review", "conceptual article", "literature review", "meta-analysis", "meta analysis", "bibliometric", "scientometric", "science mapping"]):
         return "review_or_conceptual"
     if any(term in text for term in ["experiment", "randomised", "randomized", "laboratory", "field trial"]):
         return "experimental_instrument"
@@ -512,7 +512,7 @@ def discover_research_resources(
         "qualitative_instrument": "Qualitative interview or focus-group research",
         "experimental_instrument": "Experimental research",
         "mixed_methods": "Mixed-methods research",
-        "review_or_conceptual": "Review or conceptual research",
+        "review_or_conceptual": "Review, conceptual or bibliometric research",
         "undetermined": "Research route not yet determined",
     }
     return {

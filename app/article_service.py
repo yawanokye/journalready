@@ -90,7 +90,7 @@ def _select_article_model(level: str, article_type: str = "", payload: dict[str,
     is_research_masters = "research masters" in level_l or "mphil" in level_l
     is_review_article = any(token in type_l for token in [
         "systematic", "scoping", "meta-analysis", "meta analysis",
-        "review article", "literature review", "conceptual", "theory",
+        "review article", "literature review", "conceptual", "theory", "bibliometric", "scientometric",
     ])
     is_long = target_words > 9000 or long_mode == "batch"
     is_completion = stage == "continuation_after_results"
@@ -172,8 +172,12 @@ def _call_openai_response_with_fallback(
 
 def _article_kind(article_type: str) -> str:
     t = (article_type or "").lower()
+    if any(x in t for x in ["bibliometric", "scientometric", "science mapping", "co-citation", "co citation"]):
+        return "bibliometric_or_scientometric_article"
     if any(x in t for x in ["systematic", "meta-analysis", "meta analysis"]):
         return "systematic_review_or_meta_analysis"
+    if any(x in t for x in ["conceptual", "theory article", "theoretical article"]):
+        return "conceptual_or_theory_article"
     if any(x in t for x in ["review", "literature review", "scoping"]):
         return "review_article_or_literature_review"
     if any(x in t for x in ["short", "brief", "communication"]):
@@ -181,6 +185,21 @@ def _article_kind(article_type: str) -> str:
     if "conference" in t:
         return "conference_paper"
     return "standard_research_article"
+
+
+def _is_full_synthesis_article(article_type: str) -> bool:
+    """Return True for article types that can be developed as full evidence-synthesis papers.
+
+    These designs do not require primary data collection. Systematic, scoping and
+    bibliometric articles still require transparent corpus/search evidence, so any
+    missing counts or software-derived results remain explicit author actions.
+    """
+    return _article_kind(article_type) in {
+        "systematic_review_or_meta_analysis",
+        "review_article_or_literature_review",
+        "conceptual_or_theory_article",
+        "bibliometric_or_scientometric_article",
+    }
 
 
 def _article_reference_expectations(article_type: str) -> dict[str, Any]:
@@ -201,6 +220,16 @@ def _article_reference_expectations(article_type: str) -> dict[str, Any]:
             "target_range": "80-300+ references",
             "default_search_limit": 180,
             "guidance": "Systematic reviews and meta-analyses require exhaustive, transparent coverage consistent with the review protocol and eligibility criteria.",
+        },
+        "conceptual_or_theory_article": {
+            "target_range": "60-140+ references",
+            "default_search_limit": 120,
+            "guidance": "Conceptual articles require broad, critical and theory-led coverage that supports construct clarification, integration, propositions and a defensible research agenda.",
+        },
+        "bibliometric_or_scientometric_article": {
+            "target_range": "80-250+ references",
+            "default_search_limit": 180,
+            "guidance": "Bibliometric and scientometric articles require a transparent corpus, reproducible search and cleaning rules, performance analysis, science mapping and careful interpretation of software-derived outputs.",
         },
         "short_communication_or_brief_report": {
             "target_range": "10-25 references",
@@ -1174,7 +1203,10 @@ def _article_word_range(payload: dict[str, Any]) -> tuple[int, int, int]:
 def _default_article_sections(payload: dict[str, Any], target_words: int) -> list[dict[str, Any]]:
     stage = str(payload.get("draft_stage") or "full_article")
     article_type = str(payload.get("article_type") or "Empirical research article")
-    is_review = _article_kind(article_type) in {"review_article_or_literature_review", "systematic_review_or_meta_analysis"}
+    article_kind = _article_kind(article_type)
+    is_review = article_kind in {"review_article_or_literature_review", "systematic_review_or_meta_analysis"}
+    is_conceptual = article_kind == "conceptual_or_theory_article"
+    is_bibliometric = article_kind == "bibliometric_or_scientometric_article"
     if stage == "initial_to_methods":
         sections = [
             ("Title, protocol-style abstract and keywords", 0.08),
@@ -1193,14 +1225,36 @@ def _default_article_sections(payload: dict[str, Any], target_words: int) -> lis
             ("Conclusion, contribution, implications and limitations", 0.18),
             ("Declarations, references and source use audit", 0.12),
         ]
+    elif is_bibliometric:
+        sections = [
+            ("Title, abstract and keywords", 0.05),
+            ("Introduction and review questions", 0.12),
+            ("Bibliometric corpus, search strategy and analytical methods", 0.15),
+            ("Descriptive performance analysis", 0.16),
+            ("Science mapping and intellectual structure", 0.22),
+            ("Thematic evolution, emerging fronts and geographic or collaboration patterns", 0.14),
+            ("Discussion, contribution and research agenda", 0.10),
+            ("Conclusion, limitations, declarations, references and source audit", 0.06),
+        ]
+    elif is_conceptual:
+        sections = [
+            ("Title, abstract and keywords", 0.06),
+            ("Introduction and conceptual problem", 0.15),
+            ("Conceptual foundations and construct clarification", 0.20),
+            ("Critical synthesis and theoretical tensions", 0.22),
+            ("Integrative framework and propositions", 0.18),
+            ("Theoretical contribution, boundary conditions and research agenda", 0.12),
+            ("Conclusion, limitations, declarations and references", 0.07),
+        ]
     elif is_review:
         sections = [
             ("Title, abstract and keywords", 0.06),
-            ("Introduction", 0.15),
-            ("Review protocol and methods", 0.14),
-            ("Thematic or evidence synthesis", 0.34),
-            ("Conceptual contribution and research agenda", 0.17),
-            ("Conclusion, limitations, declarations and references", 0.14),
+            ("Introduction", 0.14),
+            ("Review protocol and methods", 0.15),
+            ("Descriptive profile of the evidence base", 0.10),
+            ("Thematic or evidence synthesis", 0.29),
+            ("Discussion, conceptual contribution and research agenda", 0.17),
+            ("Conclusion, limitations, declarations and references", 0.09),
         ]
     else:
         sections = [
@@ -1251,6 +1305,9 @@ def _parse_user_article_structure(payload: dict[str, Any], target_words: int) ->
 def _article_length_structure_requirements(payload: dict[str, Any]) -> dict[str, Any]:
     min_words, max_words, target_words = _article_word_range(payload)
     sections = _parse_user_article_structure(payload, target_words)
+    default_threshold = int(os.getenv("ARTICLEREADY_BATCH_DRAFT_WORD_THRESHOLD", "6500") or 6500)
+    synthesis_threshold = int(os.getenv("ARTICLEREADY_SYNTHESIS_BATCH_DRAFT_WORD_THRESHOLD", "9500") or 9500)
+    batch_threshold = max(default_threshold, synthesis_threshold) if _is_full_synthesis_article(str(payload.get("article_type") or "")) else default_threshold
     return {
         "requested_word_limit": str(payload.get("word_limit") or ""),
         "minimum_words": min_words,
@@ -1258,13 +1315,14 @@ def _article_length_structure_requirements(payload: dict[str, Any]) -> dict[str,
         "maximum_words": max_words,
         "structure_source": "user_supplied" if str(payload.get("article_structure") or "").strip() else "article_type_default",
         "long_write_mode": str(payload.get("long_write_mode") or "auto"),
-        "batch_threshold_words": int(os.getenv("ARTICLEREADY_BATCH_DRAFT_WORD_THRESHOLD", "6500") or 6500),
+        "batch_threshold_words": batch_threshold,
         "sections": sections,
         "length_rules": [
             "Treat the word limit as a depth and structure requirement, not permission to add filler.",
             "Meet the length through sharper conceptualisation, stronger literature synthesis, method justification, transparent analysis reporting and rigorous discussion.",
             "Follow the user's article structure when supplied. Do not merge or omit requested sections unless the selected stage forbids them.",
             "For long articles, develop each section to its allocated target and avoid ending with a short outline when a full manuscript is requested.",
+            "In Auto mode, synthesis articles up to the synthesis batch threshold use one complete drafting pass to reduce web-request timeout risk. Explicit Batch mode still drafts section by section.",
             "If evidence is missing for a requested section, keep the section but insert a red [Author action: ...] item rather than inventing facts, results or citations.",
         ],
     }
@@ -1406,9 +1464,11 @@ def _prepare_workflow_payload(payload: dict[str, Any]) -> dict[str, Any]:
     stage = str(prepared.get("draft_stage") or "full_article").strip()
     if stage not in {"full_article", "initial_to_methods", "continuation_after_results"}:
         stage = "full_article"
-    if independent and stage == "full_article":
+    synthesis_full_article = _is_full_synthesis_article(str(prepared.get("article_type") or ""))
+    if independent and stage == "full_article" and not synthesis_full_article:
         stage = "initial_to_methods"
     prepared["draft_stage"] = stage
+    prepared["full_synthesis_article"] = synthesis_full_article
     if independent:
         # Independent articles should not depend on thesis/dissertation/project material.
         prepared["source_thesis_title"] = ""
@@ -1642,6 +1702,161 @@ Data availability: [confirm data availability statement]
 ## References
 
 [merge and verify all {citation_style} references cited in the completed article]{source_audit}
+""".strip()
+
+    article_kind = _article_kind(article_type)
+    if article_kind == "conceptual_or_theory_article":
+        return f"""# {title}
+
+## Abstract
+
+[Author action: Confirm the final abstract after the conceptual argument, propositions and contribution have been reviewed.]
+
+## Keywords
+
+[Author action: Confirm four to six indexing terms that represent the article's central concepts.]
+
+## 1. Introduction
+
+This full conceptual article establishes the conceptual problem, identifies theoretical tensions and develops a focused contribution from the verified evidence base. {source_note}
+
+## 2. Conceptual Foundations and Construct Clarification
+
+[Author action: Verify the definitions, theoretical lineage and boundaries of each focal construct against the original sources.]
+
+## 3. Critical Synthesis and Theoretical Tensions
+
+[Author action: Complete the critical synthesis using the attached evidence bank and remove any claim that lacks direct source support.]
+
+## 4. Integrative Framework and Propositions
+
+[Author action: Confirm the logic, boundary conditions and wording of each proposition before submission.]
+
+## 5. Discussion and Contribution
+
+[Author action: Confirm the precise theoretical contribution, alternative explanations and conditions under which the framework may not hold.]
+
+## 6. Research Agenda and Practical Implications
+
+[Author action: Retain only implications that follow directly from the conceptual synthesis.]
+
+## 7. Conclusion and Limitations
+
+[Author action: Confirm the scope limitations and the claims that remain provisional.]
+
+## Declarations
+
+Funding: [Author action: Confirm the funding statement.]
+
+Conflict of interest: [Author action: Confirm the conflict-of-interest statement.]
+
+## References
+
+[Author action: Insert and verify all {citation_style} references cited in the article.]{source_audit}
+""".strip()
+
+    if article_kind in {"systematic_review_or_meta_analysis", "review_article_or_literature_review"}:
+        return f"""# {title}
+
+## Abstract
+
+[Author action: Confirm the review objective, databases, search date, eligibility criteria, evidence-base size, principal synthesis and contribution.]
+
+## Keywords
+
+[Author action: Confirm four to six review and subject indexing terms.]
+
+## 1. Introduction
+
+This full review article defines the review problem, explains why synthesis is needed and states the review questions. {source_note}
+
+## 2. Review Methods
+
+[Author action: Confirm the databases, complete search strings, search dates, inclusion and exclusion criteria, screening process, quality appraisal and synthesis method.]
+
+## 3. Profile of the Evidence Base
+
+[Author action: Insert the verified search, deduplication, screening and inclusion counts. Do not infer PRISMA counts from metadata search results.]
+
+## 4. Evidence Synthesis
+
+[Author action: Complete the thematic, narrative, integrative or quantitative synthesis from the verified included-study corpus.]
+
+## 5. Discussion
+
+[Author action: Confirm how the synthesis resolves, qualifies or exposes tensions in the literature and where evidence remains weak.]
+
+## 6. Contribution and Research Agenda
+
+[Author action: Confirm the conceptual, empirical, methodological and policy contribution and prioritise the research agenda.]
+
+## 7. Conclusion and Limitations
+
+[Author action: Confirm limitations arising from database coverage, language, period, screening and appraisal decisions.]
+
+## Declarations
+
+Funding: [Author action: Confirm the funding statement.]
+
+Conflict of interest: [Author action: Confirm the conflict-of-interest statement.]
+
+Data availability: [Author action: Confirm where the search records, screening file, extraction sheet and review protocol are available.]
+
+## References
+
+[Author action: Insert and verify all {citation_style} references cited in the article.]{source_audit}
+""".strip()
+
+    if article_kind == "bibliometric_or_scientometric_article":
+        return f"""# {title}
+
+## Abstract
+
+[Author action: Confirm the database, search period, final corpus size, analytical software, principal mapping results and contribution.]
+
+## Keywords
+
+[Author action: Confirm four to six bibliometric and subject indexing terms.]
+
+## 1. Introduction
+
+This full bibliometric article establishes the knowledge-domain problem, review questions and value of performance analysis and science mapping. {source_note}
+
+## 2. Data and Bibliometric Methods
+
+[Author action: Confirm the database, complete search string, search date, document types, language restrictions, deduplication rules, final corpus and software settings.]
+
+## 3. Descriptive Performance Analysis
+
+[Author action: Insert verified annual production, citation, source, author, institution and country statistics from the bibliometric output.]
+
+## 4. Science Mapping and Intellectual Structure
+
+[Author action: Insert verified co-citation, bibliographic coupling, co-authorship and co-word results, including thresholds, normalisation and cluster labels.]
+
+## 5. Thematic Evolution and Emerging Research Fronts
+
+[Author action: Insert verified thematic-map, trend-topic or temporal-network results and explain how the field has changed.]
+
+## 6. Discussion and Contribution
+
+[Author action: Confirm the interpretation of the mapped structures against the underlying publications. Network proximity alone does not establish conceptual agreement or causality.]
+
+## 7. Research Agenda, Limitations and Conclusion
+
+[Author action: Confirm the research agenda and limitations arising from database coverage, citation lag, search design, disambiguation and software choices.]
+
+## Declarations
+
+Funding: [Author action: Confirm the funding statement.]
+
+Conflict of interest: [Author action: Confirm the conflict-of-interest statement.]
+
+Data availability: [Author action: Confirm where the exported corpus, cleaning log, code and network files are available.]
+
+## References
+
+[Author action: Insert and verify all {citation_style} references cited in the article.]{source_audit}
 """.strip()
 
     return f"""# {title}
@@ -2226,9 +2441,19 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
                 "Write Results, Discussion, Conclusion, updated Abstract, implications, limitations, declarations and the final References from supplied evidence only.",
                 "Do not invent missing coefficients, p-values, sample details, themes, quotations, tables or figures.",
             ],
-            "full_article": [
-                "Draft the full article because the user supplied a completed thesis, project, dataset analysis or study evidence.",
-            ],
+            "full_article": (
+                [
+                    "Draft a complete evidence-synthesis article. Formal primary data collection is not required for this article type.",
+                    "Use the attached source bank, verified references, supplied corpus information and any review or bibliometric output as the evidential base.",
+                    "For a conceptual article, develop the full conceptual argument, construct clarification, integrative framework, propositions, boundary conditions, contribution and research agenda without inventing empirical findings.",
+                    "For a systematic or scoping review, write all full-article sections but report search counts, screening decisions, quality appraisal and included-study results only when supplied. Missing review outputs remain [Author action: ...] items.",
+                    "For a bibliometric article, write all full-article sections but report corpus statistics, citation indicators, networks, clusters and thematic evolution only when supplied by verified bibliometric output. Never invent bibliometric results.",
+                ]
+                if _is_full_synthesis_article(str(payload.get("article_type") or ""))
+                else [
+                    "Draft the full article because the user supplied a completed thesis, project, dataset analysis or study evidence.",
+                ]
+            ),
         }[stage]
         prompt = {
             "task": "Draft the requested stage of a publishable journal article and, where requested, a separate provisional instrument package.",
@@ -2246,6 +2471,7 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
                 "Respect the target word range and section allocation. A 7,000-9,000 word article must be developed as a full manuscript, not as a short protocol outline.",
                 "When user-supplied article_structure is provided, follow it closely and preserve all requested sections unless the selected stage forbids them.",
                 "Treat an independent article as a new study, not as a disguised thesis extraction. Thesis, dissertation and project fields are intentionally blank in independent mode.",
+                "Systematic, scoping, conceptual, theory-led and bibliometric articles may be drafted as full independent articles because their evidence base is literature or publication metadata rather than new primary data. Do not force these article types to stop at Methods.",
                 "Do not guarantee publication and do not fabricate evidence, results, citations, permissions, ethics approvals, data access or declarations.",
                 "Use bracketed attention placeholders for missing details.",
                 "Apply a relevance gate to all attached scholarly sources and research resources.",
@@ -2278,7 +2504,8 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
             "Apply the supplied strong human-supervised academic writing layer: use natural sentence-length variation, varied paragraph openings, "
             "precise disciplinary language and evidence-led reasoning while preserving citations, technical terms, tables, equations and placeholders. "
             "Do not add deliberate errors, unrelated tangents, or commentary about AI detection or humanisation. "
-            "For a new independent study, stop the article body at Methods and provide data-source or instrument guidance without inventing access or validated items. "
+            "For a new independent empirical study, stop the article body at Methods and provide data-source or instrument guidance without inventing access or validated items. "
+            "For a new independent systematic, scoping, conceptual or bibliometric article, draft the full article while keeping unsupplied screening, corpus and software outputs as [Author action: ...] items. "
             "For Stage 2, use the uploaded previous sections and results to complete the manuscript."
         )
         try:

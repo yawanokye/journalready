@@ -37,7 +37,7 @@ def _recommended_draft_plan(data: dict[str, Any]) -> str:
     target_words = int(data.get("target_word_count") or 0)
     if stage == "initial_to_methods":
         return "stage1_article"
-    if any(term in article_type for term in ["review", "scoping", "conceptual", "theory", "systematic"]):
+    if any(term in article_type for term in ["review", "scoping", "conceptual", "theory", "systematic", "bibliometric", "scientometric"]):
         return "review_conceptual_scoping"
     if target_words and target_words > 9000:
         return "long_article_plus"
