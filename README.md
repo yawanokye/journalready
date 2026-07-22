@@ -75,6 +75,22 @@ The `/article-revision` page revises an existing manuscript at PhD-level depth w
 
 Suggested additional analyses are never presented as completed. Missing evidence is identified as an author action. Confirmed statistics, quotations, tables and findings must not be silently changed.
 
+### 4. Review Evidence Workspace
+
+The `/review-evidence` page provides an auditable evidence ledger for systematic, scoping, conceptual, integrative and bibliometric work. It can:
+
+- create browser-protected review workspaces using a random project token
+- register formal database searches and citation-tracking routes
+- import RIS, BibTeX, CSV, TSV, XLSX and JSON exports
+- identify exact DOI/title-year duplicates and flag high-similarity title matches for confirmation
+- support title/abstract and full-text screening with reasons and reviewer notes
+- extract and attach text from PDF, DOCX and other supported full-text files
+- calculate verified record-flow counts and the final included corpus
+- export the complete ledger, included corpus, audit JSON and protocol/evidence-audit DOCX
+- transfer verified protocol fields and counts directly into the Article Writer
+
+The workspace does not treat OpenAlex, Crossref, Semantic Scholar or other ArticleReady metadata discovery results as formal review records unless the corresponding database export and search run are explicitly entered. Configure `ARTICLEREADY_REVIEW_DB_PATH=/var/data/articleready_review_workspace.db` on the existing persistent Render disk.
+
 ## API routes
 
 - `POST /api/article-ideas`
@@ -86,6 +102,12 @@ Suggested additional analyses are never presented as completed. Missing evidence
 - `POST /api/articles/export`
 - `POST /api/articles/revise`
 - `POST /api/articles/revision/export`
+- `POST /api/review-workspace/projects`
+- `GET/PATCH/DELETE /api/review-workspace/projects/{project_id}`
+- `POST /api/review-workspace/projects/{project_id}/imports`
+- `GET/PATCH /api/review-workspace/projects/{project_id}/records...`
+- `GET /api/review-workspace/projects/{project_id}/writer-payload`
+- `GET /api/review-workspace/projects/{project_id}/export/...`
 - `GET /health`
 
 ## Local run
@@ -105,6 +127,7 @@ Open:
 - `http://127.0.0.1:8000/topic-ideas`
 - `http://127.0.0.1:8000/article-writer`
 - `http://127.0.0.1:8000/article-revision`
+- `http://127.0.0.1:8000/review-evidence`
 
 ## Render deployment
 
@@ -216,3 +239,8 @@ Version 1.8.0 synchronises ArticleReady with the latest ThesisReady/ProjectReady
 Paid Article Ideas packages now include one DOCX export. Existing Article Ideas purchases are upgraded automatically during payment-table initialisation. The exported document contains the portfolio, objectives, questions or hypotheses, contribution, method route, candidate data or instrument resources, retained scholarly records and quality notes.
 
 Citation-density guidance has been raised to 10-14 citation occurrences per 1,000 words for standard articles and 16-22 for review, conceptual, systematic, scoping and bibliometric articles. Source search can retain up to 80 records, and up to 100 verified records can be passed into the drafting context. The model is instructed to audit section-level coverage before returning the manuscript and to use author-action placeholders when the verified source bank is insufficient.
+
+
+## Review protocol and evidence-audit builder, version 1.9.0
+
+Version 1.9.0 adds structured evidence-base documentation for systematic, scoping, conceptual, integrative and bibliometric papers. The Article Writer now records formal databases, exact search strings, dates and limits, eligibility, screening, appraisal, citation tracking, duplicate removal, synthesis, software and verified record-flow counts. It generates a separate DOCX-ready protocol and evidence audit, checks count arithmetic and keeps ArticleReady metadata discovery distinct from formal review searching and inclusion counts. Conceptual papers retain integrative theory-building positioning unless a genuine systematic or scoping protocol is explicitly supplied.

@@ -47,6 +47,8 @@ services:
         value: https://articlereadyai.com
       - key: ARTICLEREADY_SQLITE_DB_PATH
         value: /var/data/articleready_payments.db
+      - key: ARTICLEREADY_REVIEW_DB_PATH
+        value: /var/data/articleready_review_workspace.db
       - key: PAYSTACK_SECRET_KEY
         sync: false
       - key: STRIPE_SECRET_KEY
