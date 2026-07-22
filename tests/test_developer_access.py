@@ -5,7 +5,7 @@ import importlib
 def _configure(monkeypatch):
     monkeypatch.setenv("ARTICLEREADY_DEVELOPER_ACCESS_ENABLED", "1")
     monkeypatch.setenv("ARTICLEREADY_DEVELOPER_ACCESS_EMAIL", "developer@example.com")
-    monkeypatch.setenv("ARTICLEREADY_DEVELOPER_ACCESS_CODE_SHA256", hashlib.sha256(b"a-strong-private-code").hexdigest())
+    monkeypatch.setenv("ARTICLEREADY_DEVELOPER_ACCESS_CODE_SHA256", hashlib.sha256(b"482731").hexdigest())
     monkeypatch.setenv("ARTICLEREADY_DEVELOPER_ACCESS_SECRET", "test-signing-secret-that-is-long-enough")
     monkeypatch.setenv("ARTICLEREADY_DEVELOPER_SESSION_HOURS", "2")
 
