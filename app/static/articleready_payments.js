@@ -74,9 +74,7 @@
     if (!record) return {ok: false, active: false, message: 'Developer access is inactive.'};
     const response = await fetch('/api/developer/status', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json', Accept: 'application/json'},
-      credentials: 'same-origin',
-      cache: 'no-store',
+      headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({developer_token: record.developer_token}),
     });
     const data = await readResponse(response);
@@ -141,19 +139,6 @@
       headers['x-articleready-access-token'] = c.access_token;
     }
     return headers;
-  }
-  async function authorisedFetch(input, init = {}, preferredPlan = '') {
-    const headers = new Headers(init.headers || {});
-    const accessHeaders = paymentHeaders(preferredPlan);
-    Object.entries(accessHeaders).forEach(([name, value]) => {
-      if (value) headers.set(name, value);
-    });
-    return fetch(input, {
-      ...init,
-      headers,
-      credentials: init.credentials || 'same-origin',
-      cache: init.cache || 'no-store',
-    });
   }
   function workIdFromPage() {
     const title = document.getElementById('articleTitle')?.value || document.getElementById('researchArea')?.value || document.title || 'general';
@@ -237,7 +222,7 @@
     const type = (document.getElementById('articleType')?.value || '').toLowerCase();
     const words = Number(document.getElementById('targetWordCount')?.value || 0);
     if (stage === 'initial_to_methods') return 'stage1_article';
-    if (type.includes('review') || type.includes('scoping') || type.includes('conceptual') || type.includes('systematic')) return 'review_conceptual_scoping';
+    if (type.includes('review') || type.includes('scoping') || type.includes('conceptual') || type.includes('systematic') || type.includes('bibliometric') || type.includes('scientometric')) return 'review_conceptual_scoping';
     if (words > 9000) return 'long_article_plus';
     return 'standard_full_article';
   }
@@ -297,7 +282,6 @@
   }
   window.ArticleReadyPayments = {
     paymentHeaders,
-    authorisedFetch,
     openCheckout,
     openFromApi,
     remember,

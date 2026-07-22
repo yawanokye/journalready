@@ -95,6 +95,11 @@ function isIndependent() {
   return val("sourceMode") === "Develop as a new independent article";
 }
 
+function isFullSynthesisArticle() {
+  const type = val("articleType").toLowerCase();
+  return ["systematic", "scoping", "conceptual", "theory", "bibliometric", "scientometric"].some(term => type.includes(term));
+}
+
 function currentTargetWords() {
   const explicit = Number(val("targetWordCount") || 0);
   if (explicit) return Math.max(1200, Math.min(explicit, 30000));
@@ -110,7 +115,8 @@ function updateLengthPlanSummary() {
   const sourceCount = attachedSourceBank.length;
   const outputTokens = Math.round(words * 1.35);
   const baseInput = 4500 + Math.round(sourceCount * 250);
-  const batch = mode === "batch" || (mode === "auto" && words >= 6500);
+  const autoThreshold = isFullSynthesisArticle() ? 9500 : 6500;
+  const batch = mode === "batch" || (mode === "auto" && words >= autoThreshold);
   const estimatedTotal = batch ? Math.round((baseInput * 3.5) + outputTokens) : baseInput + outputTokens;
   const modeText = batch ? "Batch drafting expected" : "Single-pass drafting expected";
   $("tokenEstimateBadge").textContent = `${Math.round(estimatedTotal / 1000)}k token estimate`;
@@ -124,13 +130,29 @@ function setGroupDisabled(groupId, disabled) {
   group.querySelectorAll("input, textarea, select, button").forEach(control => { control.disabled = disabled; });
 }
 
-function applyWorkflowState(sourceChanged = false) {
+function applyWorkflowState(sourceChanged = false, articleTypeChanged = false) {
   const independent = isIndependent();
-  const fullOption = $("draftStage").querySelector('option[value="full_article"]');
-  fullOption.disabled = independent;
+  const synthesisFull = isFullSynthesisArticle();
+  const draftStage = $("draftStage");
+  const fullOption = draftStage.querySelector('option[value="full_article"]');
+  const initialOption = draftStage.querySelector('option[value="initial_to_methods"]');
+
+  fullOption.disabled = independent && !synthesisFull;
+  fullOption.textContent = synthesisFull
+    ? "Full synthesis article from literature or publication metadata"
+    : "Full article from a completed study";
+  initialOption.textContent = synthesisFull
+    ? "Optional protocol or methods-only draft"
+    : "Stage 1: Develop new article up to Methods";
 
   if (independent) {
-    if (val("draftStage") === "full_article") $("draftStage").value = "initial_to_methods";
+    if (synthesisFull) {
+      if (sourceChanged || articleTypeChanged) {
+        draftStage.value = "full_article";
+      }
+    } else if (val("draftStage") === "full_article") {
+      draftStage.value = "initial_to_methods";
+    }
     if (sourceChanged) $("academicLevel").value = "PhD";
     $("sourceThesisTitle").value = "";
     $("thesisSourceMaterial").value = "";
@@ -140,6 +162,11 @@ function applyWorkflowState(sourceChanged = false) {
 
   setGroupDisabled("sourceStudyFields", independent);
   $("independentNotice").hidden = !independent;
+  if (independent) {
+    $("independentNotice").innerHTML = synthesisFull
+      ? "<strong>Independent synthesis article mode is active.</strong> Thesis and project inputs are disabled. A complete systematic, scoping, conceptual or bibliometric article can be drafted from verified literature, source records and supplied review outputs. Missing screening or bibliometric results remain red author-action items."
+      : "<strong>Independent empirical article mode is active.</strong> Thesis, dissertation and project inputs are disabled. Research depth is PhD by default, and Stage 1 stops at Methods until results or analysis are supplied.";
+  }
 
   const stage = val("draftStage") || "full_article";
   const initial = stage === "initial_to_methods";
@@ -148,14 +175,35 @@ function applyWorkflowState(sourceChanged = false) {
   $("completedEvidenceFields").hidden = initial;
   setGroupDisabled("completedEvidenceFields", initial);
 
-  const messages = {
-    full_article: "A complete study is available. The app may draft the full manuscript from supplied evidence.",
-    initial_to_methods: "Stage 1 drafts the article body from Title through Methods only. Results, Discussion and Conclusion are intentionally withheld.",
-    continuation_after_results: "Stage 2 requires the previous sections and completed results or analysis. It integrates them into a full article."
-  };
-  $("stageMessage").textContent = messages[stage];
-  $("draftBtn").textContent = initial ? "Draft article up to Methods" : continuation ? "Complete article from results" : "Draft full journal article";
-  $("outputHelp").textContent = initial ? "This output should stop at Methods, followed only by readiness, resource and reference notes." : continuation ? "The earlier sections and uploaded results will be integrated into one completed article." : "Review all claims, citations, results and journal requirements before submission.";
+  if (synthesisFull && stage === "full_article") {
+    $("dataResults").placeholder = "Optional. Paste verified review-screening counts, included-study synthesis, bibliometric tables, network outputs, cluster results, thematic maps, or corpus statistics. Missing formal outputs are shown as red author-action items rather than invented.";
+    $("keyFindings").placeholder = "Optional. State verified synthesis findings, conceptual propositions, bibliometric patterns, clusters, themes, or research fronts.";
+  } else {
+    $("dataResults").placeholder = "Paste actual coefficients, p-values, fit statistics, themes, quotations, robustness checks, tables, or a careful results summary.";
+    $("keyFindings").placeholder = "State only findings supported by the study evidence";
+  }
+
+  let stageMessage = "";
+  if (stage === "full_article" && synthesisFull) {
+    stageMessage = "A complete synthesis article is produced from verified literature or publication metadata. Primary data collection is not required. Unsupplied screening, corpus or software-derived results remain red author-action items.";
+  } else if (stage === "full_article") {
+    stageMessage = "A complete study is available. The app may draft the full manuscript from supplied evidence.";
+  } else if (stage === "initial_to_methods") {
+    stageMessage = synthesisFull
+      ? "This optional protocol route develops the review rationale and methods only. Select Full synthesis article to generate the complete paper."
+      : "Stage 1 drafts the article body from Title through Methods only. Results, Discussion and Conclusion are intentionally withheld.";
+  } else {
+    stageMessage = "Stage 2 requires the previous sections and completed results or analysis. It integrates them into a full article.";
+  }
+  $("stageMessage").textContent = stageMessage;
+  $("draftBtn").textContent = initial ? "Draft article up to Methods" : continuation ? "Complete article from results" : synthesisFull ? "Draft full synthesis article" : "Draft full journal article";
+  $("outputHelp").textContent = initial
+    ? "This output stops at Methods, followed only by readiness, resource and reference notes."
+    : continuation
+      ? "The earlier sections and uploaded results are integrated into one completed article."
+      : synthesisFull
+        ? "The complete synthesis paper is drafted from verified evidence. Review all red author-action items before submission."
+        : "Review all claims, citations, results and journal requirements before submission.";
   updateLengthPlanSummary();
 }
 
@@ -328,10 +376,8 @@ async function draft(event) {
   $("draftBtn").disabled = true; $("copyBtn").disabled = true; $("downloadBtn").disabled = true;
   try {
     const planKey = window.ArticleReadyPayments ? ArticleReadyPayments.selectedDraftPlan() : '';
-    const requestInit = {method:"POST", headers:{"Content-Type":"application/json", Accept:"application/json"}, body:JSON.stringify(payload())};
-    const response = window.ArticleReadyPayments
-      ? await ArticleReadyPayments.authorisedFetch("/api/articles/draft", requestInit, planKey)
-      : await fetch("/api/articles/draft", requestInit);
+    const headers = {"Content-Type":"application/json", ...(window.ArticleReadyPayments ? ArticleReadyPayments.paymentHeaders(planKey) : {})};
+    const response = await fetch("/api/articles/draft", {method:"POST", headers, body:JSON.stringify(payload())});
     const body = await readApiResponse(response);
     if (response.status === 402 && window.ArticleReadyPayments) { ArticleReadyPayments.openFromApi(body.detail || {}); return; }
     if (!response.ok) throw new Error(apiErrorMessage(body.detail ?? body, response.statusText || `Request failed (${response.status})`));
@@ -365,10 +411,8 @@ async function downloadContent(text, title, filename) {
   $("status").textContent = "Preparing the DOCX file...";
   try {
     const planKey = window.ArticleReadyPayments ? ArticleReadyPayments.selectedDraftPlan() : '';
-    const requestInit = {method:"POST", headers:{"Content-Type":"application/json", Accept:"application/json"}, body:JSON.stringify({article_title:title, article_text:text})};
-    const response = window.ArticleReadyPayments
-      ? await ArticleReadyPayments.authorisedFetch("/api/articles/export", requestInit, planKey)
-      : await fetch("/api/articles/export", requestInit);
+    const headers = {"Content-Type":"application/json", ...(window.ArticleReadyPayments ? ArticleReadyPayments.paymentHeaders(planKey) : {})};
+    const response = await fetch("/api/articles/export", {method:"POST", headers, body:JSON.stringify({article_title:title, article_text:text})});
     if (response.status === 402 && window.ArticleReadyPayments) { const data = await readApiResponse(response); ArticleReadyPayments.openFromApi(data.detail || {}); return; }
     if (!response.ok) { const data = await readApiResponse(response); throw new Error(apiErrorMessage(data.detail ?? data, response.statusText || `Request failed (${response.status})`)); }
     const blob = await response.blob(); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); $("status").textContent = "DOCX downloaded.";
@@ -378,13 +422,14 @@ async function downloadContent(text, title, filename) {
 function clearAll() {
   $("articleForm").reset(); $("wordLimit").value = "7000-9000"; $("targetWordCount").value = "8000"; $("longWriteMode").value = "auto"; $("articleStructure").value = ""; $("draftStage").value = "full_article"; $("academicLevel").value = "Research Masters (e.g. MPhil)"; $("researchRoute").value = "Auto";
   $("articleOutput").value = ""; $("instrumentOutput").value = ""; $("instrumentOutputPanel").hidden = true; $("instrumentRequirementsLabel").hidden = true; $("filters").innerHTML = ""; $("sources").innerHTML = ""; $("draftSourceSummary").innerHTML = ""; $("status").textContent = "";
-  $("copyBtn").disabled = true; $("downloadBtn").disabled = true; lastText = ""; lastInstrumentText = ""; latestResearchResources = null; renderResearchResources(null); clearAttachedSources(); applyWorkflowState(false);
+  $("copyBtn").disabled = true; $("downloadBtn").disabled = true; lastText = ""; lastInstrumentText = ""; latestResearchResources = null; renderResearchResources(null); clearAttachedSources(); applyWorkflowState(false, false);
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  restoreSources(); renderAttachedSummary(); renderLatestSearch(latestSourceSearchResult); renderResearchResources(null); applyWorkflowState(false);
-  $("sourceMode").addEventListener("change", () => applyWorkflowState(true));
-  $("draftStage").addEventListener("change", () => applyWorkflowState(false));
+  restoreSources(); renderAttachedSummary(); renderLatestSearch(latestSourceSearchResult); renderResearchResources(null); applyWorkflowState(false, false);
+  $("sourceMode").addEventListener("change", () => applyWorkflowState(true, false));
+  $("articleType").addEventListener("change", () => { applyWorkflowState(false, true); markResourcesStale(); });
+  $("draftStage").addEventListener("change", () => applyWorkflowState(false, false));
   $("researchRoute").addEventListener("change", () => { $("resourceRouteBadge").textContent = val("researchRoute"); markResourcesStale(); });
   $("includeInstrumentDraft").addEventListener("change", () => { $("instrumentRequirementsLabel").hidden = !$("includeInstrumentDraft").checked; });
   ["articleTitle", "researchArea", "context", "objectives", "variablesConstructs", "methodology", "extractionFocus"].forEach(id => $(id).addEventListener("input", markResourcesStale));

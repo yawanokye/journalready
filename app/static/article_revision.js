@@ -137,14 +137,11 @@ form.addEventListener('submit', async (event) => {
   message('Revising the manuscript and assessing publication readiness…');
   try {
     const planKey = window.ArticleReadyPayments ? ArticleReadyPayments.selectedRevisionPlan() : '';
-    const requestInit = {
+    const response = await fetch('/api/articles/revise', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json', Accept: 'application/json'},
+      headers: { 'Content-Type': 'application/json', ...(window.ArticleReadyPayments ? ArticleReadyPayments.paymentHeaders(planKey) : {}) },
       body: JSON.stringify(payload),
-    };
-    const response = window.ArticleReadyPayments
-      ? await ArticleReadyPayments.authorisedFetch('/api/articles/revise', requestInit, planKey)
-      : await fetch('/api/articles/revise', requestInit);
+    });
     const data = await readApiResponse(response);
     if (response.status === 402 && window.ArticleReadyPayments) { ArticleReadyPayments.openFromApi(data.detail || {}); return; }
     if (!response.ok) throw new Error(apiErrorMessage(data.detail ?? data, 'Article revision failed.'));
@@ -186,9 +183,9 @@ downloadRevisionBtn.addEventListener('click', async () => {
   downloadRevisionBtn.disabled = true;
   try {
     const planKey = window.ArticleReadyPayments ? ArticleReadyPayments.selectedRevisionPlan() : '';
-    const requestInit = {
+    const response = await fetch('/api/articles/revision/export', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json', Accept: 'application/json'},
+      headers: { 'Content-Type': 'application/json', ...(window.ArticleReadyPayments ? ArticleReadyPayments.paymentHeaders(planKey) : {}) },
       body: JSON.stringify({
         article_title: byId('articleTitle').value.trim() || 'Revised Journal Article',
         original_article_text: articleText.value.trim(),
@@ -197,10 +194,7 @@ downloadRevisionBtn.addEventListener('click', async () => {
         reviewer_response_matrix: reviewerMatrix.value,
         include_revision_report: true,
       }),
-    };
-    const response = window.ArticleReadyPayments
-      ? await ArticleReadyPayments.authorisedFetch('/api/articles/revision/export', requestInit, planKey)
-      : await fetch('/api/articles/revision/export', requestInit);
+    });
     if (response.status === 402 && window.ArticleReadyPayments) {
       const data = await readApiResponse(response);
       ArticleReadyPayments.openFromApi(data.detail || {});

@@ -18,7 +18,7 @@
         <p class="eyebrow">journal manuscript development Platform</p>
         <h1>Develop and support your journal article writing with ArticleReady AI.</h1>
       </div>
-      <aside class="hero-note"><h2>Two-stage workflow</h2><p>Stage 1 builds the article rationale, literature, framework and methods. Stage 2 uses the uploaded earlier draft and actual analysis to write the Results, Discussion, Conclusion and updated Abstract.</p></aside>
+      <aside class="hero-note"><h2>Flexible article workflow</h2><p>Empirical articles use Stage 1 before results and Stage 2 after analysis. Systematic, scoping, conceptual and bibliometric articles can be developed as complete synthesis papers from verified literature or publication metadata.</p></aside>
     </section>
 
     <section class="grid-two">
@@ -37,7 +37,7 @@
           <label><span class="field-label">Source thesis or study title</span><input id="sourceThesisTitle" placeholder="Original thesis, dissertation, project or dataset title"></label>
           <label class="priority"><span class="field-label">Thesis or study source material</span><textarea id="thesisSourceMaterial" rows="9" placeholder="Paste the abstract, relevant literature, method, results, discussion, chapter extracts, or study summary needed for this article."></textarea><span class="help">This information is disabled for a new independent article.</span></label>
         </div>
-        <div id="independentNotice" class="attached-summary" hidden><strong>Independent article mode is active.</strong> Thesis, dissertation and project inputs are disabled. Research depth has been set to PhD by default and Stage 1 stops at Methods.</div>
+        <div id="independentNotice" class="attached-summary" hidden><strong>Independent article mode is active.</strong> Thesis, dissertation and project inputs are disabled. Research depth is set to PhD by default. Empirical articles stop at Methods, while synthesis article types can be drafted in full.</div>
 
         <label><span class="field-label">Article development focus</span><textarea id="extractionFocus" rows="3" placeholder="State the one relationship, mechanism, theme, policy problem, methodological issue, or contribution this article should develop."></textarea></label>
 
@@ -63,7 +63,7 @@
 
         <div class="research-resource-panel">
           <div class="source-panel-head"><div><h3>Data source and instrument guidance</h3><p class="help">Secondary studies receive possible official datasets. Primary and qualitative studies receive candidate questionnaire, scale, interview-guide or instrument sources.</p></div><span id="resourceRouteBadge" class="source-count-badge">Auto</span></div>
-          <div class="two-cols"><label><span class="field-label">Research route</span><select id="researchRoute"><option>Auto</option><option>Secondary data or existing dataset</option><option>Primary survey or questionnaire</option><option>Qualitative interviews or focus groups</option><option>Mixed methods</option><option>Experimental research</option><option>Review or conceptual research</option></select></label><label><span class="field-label">Maximum resources</span><select id="resourceMaxResults"><option value="4">4</option><option value="6" selected>6</option><option value="8">8</option><option value="10">10</option></select></label></div>
+          <div class="two-cols"><label><span class="field-label">Research route</span><select id="researchRoute"><option>Auto</option><option>Secondary data or existing dataset</option><option>Primary survey or questionnaire</option><option>Qualitative interviews or focus groups</option><option>Mixed methods</option><option>Experimental research</option><option>Review, conceptual or bibliometric research</option></select></label><label><span class="field-label">Maximum resources</span><select id="resourceMaxResults"><option value="4">4</option><option value="6" selected>6</option><option value="8">8</option><option value="10">10</option></select></label></div>
           <div class="actions compact-actions"><button id="findResourcesBtn" type="button" class="secondary">Find data or instrument resources</button></div>
           <p id="resourceStatus" class="status"></p>
           <div id="resourceSummary" class="attached-summary">No research-resource guidance has been generated yet.</div>
@@ -73,7 +73,7 @@
         </div>
 
         <div class="two-cols">
-          <label><span class="field-label">Article type</span><select id="articleType"><option>Empirical research article</option><option>Systematic review</option><option>Scoping review</option><option>Conceptual article</option><option>Methodological article</option><option>Case study article</option><option>Policy or practice article</option><option>Short communication</option></select></label>
+          <label><span class="field-label">Article type</span><select id="articleType"><option>Empirical research article</option><option>Systematic review</option><option>Scoping review</option><option>Conceptual article</option><option>Bibliometric article</option><option>Methodological article</option><option>Case study article</option><option>Policy or practice article</option><option>Short communication</option></select></label>
           <label><span class="field-label">Research depth</span><select id="academicLevel"><option>Bachelors</option><option>Non-Research Masters</option><option selected>Research Masters (e.g. MPhil)</option><option>Professional Doctorate (DBA, DEd)</option><option>PhD</option></select></label>
         </div>
         <div class="two-cols"><label><span class="field-label">Target word limit</span><input id="wordLimit" value="7000-9000" placeholder="e.g. 7000-9000"></label><label><span class="field-label">Citation style</span><select id="citationStyle"><option>APA 7th</option><option>Harvard</option><option>Chicago Author-Date</option><option>Vancouver</option><option>IEEE</option><option>AMA</option><option>Journal-specific style</option></select></label></div>
@@ -121,7 +121,7 @@ Conclusion 600"></textarea></label>
 
     <section class="card" style="margin-top:22px"><h2>4. Source records supplied to the draft</h2><p class="help">Relevant records should appear in normal citations and in the Source Use Audit. Detected retracted or withdrawn records are excluded where metadata exposes their status.</p><div id="filters" class="idea-meta"></div><div id="draftSourceSummary" class="attached-summary"></div><div id="sources" class="source-grid"></div></section>
   </main>
-  <script src="/static/articleready_payments.js?v=20260722-developer-access-v3"></script>
-  <script src="/static/article_writer.js?v=20260722-developer-access-v3"></script>
+  <script src="/static/articleready_payments.js?v=20260722-full-synthesis"></script>
+  <script src="/static/article_writer.js?v=20260722-full-synthesis"></script>
 </body>
 </html>
