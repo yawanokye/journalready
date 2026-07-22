@@ -1,54 +1,266 @@
 (function () {
-  const form = document.getElementById('developerAccessForm');
-  const email = document.getElementById('developerEmail');
-  const code = document.getElementById('developerCode');
-  const status = document.getElementById('developerStatus');
-  const card = document.getElementById('developerSessionCard');
-  const logout = document.getElementById('developerLogoutBtn');
+'use strict';
 
-  function formatExpiry(epochSeconds) {
-    if (!epochSeconds) return 'Unknown';
-    return new Date(Number(epochSeconds) * 1000).toLocaleString();
-  }
+const form = document.getElementById('developerAccessForm');
+const emailInput = document.getElementById('developerEmail');
+const codeInput = document.getElementById('developerCode');
+const statusElement = document.getElementById('developerStatus');
+const sessionCard = document.getElementById('developerSessionCard');
+const logoutButton = document.getElementById('developerLogoutBtn');
+const submitButton = form?.querySelector('button[type="submit"]');
 
-  function renderSession(info) {
-    if (info?.active) {
-      card.innerHTML = `<div class="developer-active-badge">Developer access active</div><p><strong>Email:</strong> ${info.email || 'Not restricted by email'}</p><p><strong>Expires:</strong> ${formatExpiry(info.expires_at)}</p><p class="muted">Paid actions are available without consuming a customer package until this session expires or is ended.</p>`;
-    } else {
-      card.innerHTML = `<div class="developer-inactive-badge">Developer access inactive</div><p class="muted">Enter the configured developer credentials to begin a signed session.</p>`;
-    }
-  }
+if (
+!form ||
+!emailInput ||
+!codeInput ||
+!statusElement ||
+!sessionCard ||
+!logoutButton
+) {
+console.error('Developer access page elements could not be found.');
+return;
+}
 
-  async function refresh() {
-    const info = await ArticleReadyPayments.developerStatus();
-    renderSession(info);
-  }
+if (!window.ArticleReadyPayments) {
+statusElement.textContent =
+'Developer access services could not be loaded. Refresh the page and try again.';
+statusElement.classList.add('error');
+return;
+}
 
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    status.textContent = 'Activating developer access...';
-    try {
-      const response = await fetch('/api/developer/login', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({email: email.value.trim(), access_code: code.value}),
-      });
-      const data = await ArticleReadyPayments.readResponse(response);
-      if (!response.ok) throw new Error(ArticleReadyPayments.errorMessage(data.detail ?? data, 'Developer access could not be activated.'));
-      ArticleReadyPayments.rememberDeveloperAccess(data);
-      code.value = '';
-      status.textContent = 'Developer access activated.';
-      await refresh();
-    } catch (error) {
-      status.textContent = ArticleReadyPayments.errorMessage(error, 'Developer access could not be activated.');
-    }
+function formatExpiry(epochSeconds) {
+const timestamp = Number(epochSeconds);
+
+```
+if (!Number.isFinite(timestamp) || timestamp <= 0) {
+  return 'Unknown';
+}
+
+return new Date(timestamp * 1000).toLocaleString();
+```
+
+}
+
+function setStatus(message, type = '') {
+statusElement.textContent = message;
+statusElement.classList.remove('success', 'error', 'loading');
+
+```
+if (type) {
+  statusElement.classList.add(type);
+}
+```
+
+}
+
+function setLoading(isLoading) {
+if (submitButton) {
+submitButton.disabled = isLoading;
+submitButton.textContent = isLoading
+? 'Activating...'
+: 'Activate developer access';
+}
+
+```
+logoutButton.disabled = isLoading;
+emailInput.disabled = isLoading;
+codeInput.disabled = isLoading;
+```
+
+}
+
+function appendParagraph(label, value) {
+const paragraph = document.createElement('p');
+const strong = document.createElement('strong');
+
+```
+strong.textContent = `${label}: `;
+paragraph.appendChild(strong);
+paragraph.appendChild(document.createTextNode(value));
+
+sessionCard.appendChild(paragraph);
+```
+
+}
+
+function renderSession(info) {
+sessionCard.replaceChildren();
+
+```
+if (info?.active) {
+  const badge = document.createElement('div');
+  badge.className = 'developer-active-badge';
+  badge.textContent = 'Developer access active';
+  sessionCard.appendChild(badge);
+
+  appendParagraph(
+    'Email',
+    String(info.email || 'Not restricted by email')
+  );
+
+  appendParagraph(
+    'Expires',
+    formatExpiry(info.expires_at)
+  );
+
+  const note = document.createElement('p');
+  note.className = 'muted';
+  note.textContent =
+    'Paid actions are available without consuming a customer package until this session expires or is ended.';
+  sessionCard.appendChild(note);
+
+  logoutButton.disabled = false;
+  return;
+}
+
+const badge = document.createElement('div');
+badge.className = 'developer-inactive-badge';
+badge.textContent = 'Developer access inactive';
+sessionCard.appendChild(badge);
+
+const note = document.createElement('p');
+note.className = 'muted';
+note.textContent =
+  'Enter the configured developer credentials to begin a signed session.';
+sessionCard.appendChild(note);
+
+logoutButton.disabled = true;
+```
+
+}
+
+function validateCredentials(email, code) {
+if (!email) {
+throw new Error('Enter the configured developer email.');
+}
+
+```
+if (!/^\d{6}$/.test(code)) {
+  throw new Error('Enter the six-digit developer access code.');
+}
+```
+
+}
+
+async function refresh() {
+try {
+const info = await ArticleReadyPayments.developerStatus();
+renderSession(info);
+return info;
+} catch (error) {
+renderSession({ active: false });
+
+```
+  setStatus(
+    ArticleReadyPayments.errorMessage(
+      error,
+      'Developer session status could not be checked.'
+    ),
+    'error'
+  );
+
+  return null;
+}
+```
+
+}
+
+form.addEventListener('submit', async function (event) {
+event.preventDefault();
+
+```
+const email = emailInput.value.trim();
+const accessCode = codeInput.value.trim();
+
+try {
+  validateCredentials(email, accessCode);
+} catch (error) {
+  setStatus(error.message, 'error');
+  codeInput.focus();
+  return;
+}
+
+setLoading(true);
+setStatus('Activating developer access...', 'loading');
+
+try {
+  const response = await fetch('/api/developer/login', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json'
+    },
+    credentials: 'same-origin',
+    body: JSON.stringify({
+      email,
+      access_code: accessCode
+    })
   });
 
-  logout.addEventListener('click', async () => {
-    ArticleReadyPayments.clearDeveloperAccess();
-    status.textContent = 'Developer session ended on this browser.';
-    await refresh();
-  });
+  const data = await ArticleReadyPayments.readResponse(response);
 
-  refresh();
+  if (!response.ok) {
+    throw new Error(
+      ArticleReadyPayments.errorMessage(
+        data?.detail ?? data,
+        'Developer access could not be activated.'
+      )
+    );
+  }
+
+  ArticleReadyPayments.rememberDeveloperAccess(data);
+
+  codeInput.value = '';
+  setStatus('Developer access activated.', 'success');
+  await refresh();
+} catch (error) {
+  setStatus(
+    ArticleReadyPayments.errorMessage(
+      error,
+      'Developer access could not be activated.'
+    ),
+    'error'
+  );
+
+  codeInput.select();
+} finally {
+  setLoading(false);
+}
+```
+
+});
+
+codeInput.addEventListener('input', function () {
+const digitsOnly = codeInput.value.replace(/\D/g, '').slice(0, 6);
+
+```
+if (codeInput.value !== digitsOnly) {
+  codeInput.value = digitsOnly;
+}
+```
+
+});
+
+logoutButton.addEventListener('click', async function () {
+logoutButton.disabled = true;
+
+```
+try {
+  ArticleReadyPayments.clearDeveloperAccess();
+  setStatus('Developer session ended on this browser.', 'success');
+  await refresh();
+} catch (error) {
+  setStatus(
+    ArticleReadyPayments.errorMessage(
+      error,
+      'The developer session could not be ended.'
+    ),
+    'error'
+  );
+}
+```
+
+});
+
+refresh();
 })();
