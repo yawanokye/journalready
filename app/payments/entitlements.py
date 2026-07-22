@@ -18,14 +18,14 @@ ACTION_FIELDS: Dict[str, Tuple[str, str]] = {
 ARTICLE_PLANS: Dict[str, Dict[str, Any]] = {
     "article_ideas": {
         "name": "Article Ideas",
-        "description": "Up to 20 focused article topic ideas with readiness scores and data or instrument guidance.",
+        "description": "Up to 20 focused article topic ideas with readiness scores, data or instrument guidance and DOCX export.",
         "price_usd": 2.99,
         "per": "idea run",
         "module": "topic_ideas",
         "ideas": 1,
         "drafts": 0,
         "revisions": 0,
-        "exports": 0,
+        "exports": 1,
         "max_ideas": 20,
         "token_allowance": 20000,
         "display_order": 1,

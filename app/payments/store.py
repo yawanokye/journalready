@@ -203,10 +203,21 @@ def init_payment_tables(database_url: str = "") -> None:
         with _postgres_connection(database_url) as conn:
             with conn.cursor() as cur:
                 cur.execute(POSTGRES_SCHEMA)
+                # Article Ideas now includes one DOCX export. Upgrade existing
+                # purchases so customers who paid before this release are not stranded.
+                cur.execute(
+                    "UPDATE articleready_purchases SET exports_total=1, updated_at=CURRENT_TIMESTAMP "
+                    "WHERE plan_key='article_ideas' AND exports_total < 1"
+                )
             conn.commit()
         return
     with _sqlite_connection() as conn:
         conn.executescript(SQLITE_SCHEMA)
+        conn.execute(
+            "UPDATE articleready_purchases SET exports_total=1, updated_at=? "
+            "WHERE plan_key='article_ideas' AND exports_total < 1",
+            (_utc_iso(),),
+        )
 
 
 def _row_to_dict(row: Any) -> Optional[Dict[str, Any]]:
