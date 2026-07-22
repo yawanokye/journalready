@@ -17,7 +17,7 @@ ARTICLEREADY_DEVELOPER_SESSION_HOURS=12
 Generate the access-code hash locally:
 
 ```bash
-python -c "import hashlib; print(hashlib.sha256(b'YOUR-PRIVATE-CODE').hexdigest())"
+python -c "import hashlib; print(hashlib.sha256(b'YOUR-6-DIGIT-CODE').hexdigest())"
 ```
 
 Generate a signing secret locally:
@@ -36,7 +36,7 @@ Open:
 https://articlereadyai.com/developer-access
 ```
 
-Enter the configured email and the original private code. The browser receives an HMAC-signed, expiring token. The token is automatically attached to Article Ideas, Article Writer, Article Revision and DOCX export requests.
+Enter the configured email and the original six-digit private code. The browser receives an HMAC-signed, expiring token. The token is automatically attached to Article Ideas, Article Writer, Article Revision and DOCX export requests.
 
 The developer page is excluded from search indexing and is not linked in the public navigation. Five failed login attempts from the same IP within 15 minutes trigger a temporary lockout.
 

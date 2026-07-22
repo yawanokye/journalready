@@ -15,6 +15,7 @@ The `/topic-ideas` page develops publication-focused ideas from a thesis, disser
 - identified research route
 - possible official secondary datasets where secondary research is suitable
 - possible questionnaire, scale, interview-guide or instrument sources where primary or qualitative research is suitable
+- direct DOCX export of the complete topic-idea portfolio, research-resource guidance and retained source records
 - warnings on access, licensing, adaptation, validity and salami slicing
 
 Candidate resources are not automatic endorsements. Users must verify variable coverage, time and geographic coverage, population fit, access conditions, copyright or licence terms, ethics and validation requirements.
@@ -77,6 +78,7 @@ Suggested additional analyses are never presented as completed. Missing evidence
 ## API routes
 
 - `POST /api/article-ideas`
+- `POST /api/article-ideas/export`
 - `POST /api/articles/research-resources`
 - `POST /api/articles/find-sources`
 - `POST /api/articles/extract-file`
@@ -163,7 +165,7 @@ The public pricing page is available at `/pricing`. Current package structure:
 | Package | Price | Main entitlement | Internal token allowance |
 |---|---:|---|---:|
 | Free Trial | Free | 3 article ideas, no DOCX export | 5,000 |
-| Article Ideas | US$2.99 | Up to 20 article ideas with readiness score, contribution angle, possible data/instrument sources and overlap warnings | 20,000 |
+| Article Ideas | US$2.99 | Up to 20 article ideas with readiness score, contribution angle, possible data/instrument sources, overlap warnings and one DOCX export | 20,000 |
 | Stage 1 Article Builder | US$6.99 | New independent article up to Methods with framework, methods, data-source or instrument guidance and DOCX export | 45,000 |
 | Standard Full Article | US$14.99 | 7,000-9,000 word source-supported article with DOCX export and one polishing pass | 80,000 |
 | Long Article Plus | US$19.99 | 10,000-13,000 word article with batch drafting and one polishing pass | 120,000 |
@@ -200,8 +202,17 @@ ARTICLEREADY_DEVELOPER_ACCESS_SECRET=<long-random-signing-secret>
 ARTICLEREADY_DEVELOPER_SESSION_HOURS=12
 ```
 
-Open `/developer-access`, enter the configured email and private code, and activate the session. The browser receives a signed token that is accepted for Article Ideas, Article Writer, Revision and DOCX export. Developer sessions do not create purchases or consume customer entitlements. Keep the access page, code and signing secret private.
+Open `/developer-access`, enter the configured email and six-digit private code, and activate the session. The browser receives a signed token that is accepted for Article Ideas, Article Writer, Revision and DOCX export. Developer sessions do not create purchases or consume customer entitlements. Keep the access page, code and signing secret private.
 
 ## Full synthesis articles
 
 Systematic reviews, scoping reviews, conceptual articles and bibliometric articles can be generated as complete independent articles without first using the empirical Stage 1 workflow. The app does not invent search counts, included-study results, bibliometric indicators or network outputs. Missing formal evidence remains a red `[Author action: ...]` item. In Auto mode, synthesis articles below 9,500 words use a single drafting pass to reduce request-timeout risk; longer synthesis articles use the batch workflow.
+
+
+## Humanizer, DOCX topic export and citation-density update
+
+Version 1.8.0 synchronises ArticleReady with the latest ThesisReady/ProjectReady preservation-gated scholarly humanizer. The deterministic pass and optional section-batched model pass now use the same controlled perplexity, burstiness, paragraph-variation and evidence-preservation rules. Writer and revision requests may set `humanizer_mode` to `off`, `light`, `balanced` or `deep`.
+
+Paid Article Ideas packages now include one DOCX export. Existing Article Ideas purchases are upgraded automatically during payment-table initialisation. The exported document contains the portfolio, objectives, questions or hypotheses, contribution, method route, candidate data or instrument resources, retained scholarly records and quality notes.
+
+Citation-density guidance has been raised to 10-14 citation occurrences per 1,000 words for standard articles and 16-22 for review, conceptual, systematic, scoping and bibliometric articles. Source search can retain up to 80 records, and up to 100 verified records can be passed into the drafting context. The model is instructed to audit section-level coverage before returning the manuscript and to use author-action placeholders when the verified source bank is insufficient.
