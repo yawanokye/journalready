@@ -188,8 +188,10 @@ async function generate(event) {
   $("status").textContent = "Developing focused article ideas and searching for feasible data or instrument resources...";
   $("generateBtn").disabled = true;
   try {
-    const headers = {"Content-Type":"application/json", ...(window.ArticleReadyPayments ? ArticleReadyPayments.paymentHeaders('article_ideas') : {})};
-    const response = await fetch("/api/article-ideas", {method:"POST", headers, body:JSON.stringify(payload())});
+    const requestInit = {method:"POST", headers:{"Content-Type":"application/json", Accept:"application/json"}, body:JSON.stringify(payload())};
+    const response = window.ArticleReadyPayments
+      ? await ArticleReadyPayments.authorisedFetch("/api/article-ideas", requestInit, "article_ideas")
+      : await fetch("/api/article-ideas", requestInit);
     const body = await readApiResponse(response);
     if (response.status === 402 && window.ArticleReadyPayments) { ArticleReadyPayments.openFromApi(body.detail || {}); return; }
     if (!response.ok) throw new Error(apiErrorMessage(body.detail ?? body, response.statusText || `Request failed (${response.status})`));

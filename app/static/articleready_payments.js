@@ -74,7 +74,9 @@
     if (!record) return {ok: false, active: false, message: 'Developer access is inactive.'};
     const response = await fetch('/api/developer/status', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', Accept: 'application/json'},
+      credentials: 'same-origin',
+      cache: 'no-store',
       body: JSON.stringify({developer_token: record.developer_token}),
     });
     const data = await readResponse(response);
@@ -139,6 +141,19 @@
       headers['x-articleready-access-token'] = c.access_token;
     }
     return headers;
+  }
+  async function authorisedFetch(input, init = {}, preferredPlan = '') {
+    const headers = new Headers(init.headers || {});
+    const accessHeaders = paymentHeaders(preferredPlan);
+    Object.entries(accessHeaders).forEach(([name, value]) => {
+      if (value) headers.set(name, value);
+    });
+    return fetch(input, {
+      ...init,
+      headers,
+      credentials: init.credentials || 'same-origin',
+      cache: init.cache || 'no-store',
+    });
   }
   function workIdFromPage() {
     const title = document.getElementById('articleTitle')?.value || document.getElementById('researchArea')?.value || document.title || 'general';
@@ -282,6 +297,7 @@
   }
   window.ArticleReadyPayments = {
     paymentHeaders,
+    authorisedFetch,
     openCheckout,
     openFromApi,
     remember,

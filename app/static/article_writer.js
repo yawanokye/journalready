@@ -328,8 +328,10 @@ async function draft(event) {
   $("draftBtn").disabled = true; $("copyBtn").disabled = true; $("downloadBtn").disabled = true;
   try {
     const planKey = window.ArticleReadyPayments ? ArticleReadyPayments.selectedDraftPlan() : '';
-    const headers = {"Content-Type":"application/json", ...(window.ArticleReadyPayments ? ArticleReadyPayments.paymentHeaders(planKey) : {})};
-    const response = await fetch("/api/articles/draft", {method:"POST", headers, body:JSON.stringify(payload())});
+    const requestInit = {method:"POST", headers:{"Content-Type":"application/json", Accept:"application/json"}, body:JSON.stringify(payload())};
+    const response = window.ArticleReadyPayments
+      ? await ArticleReadyPayments.authorisedFetch("/api/articles/draft", requestInit, planKey)
+      : await fetch("/api/articles/draft", requestInit);
     const body = await readApiResponse(response);
     if (response.status === 402 && window.ArticleReadyPayments) { ArticleReadyPayments.openFromApi(body.detail || {}); return; }
     if (!response.ok) throw new Error(apiErrorMessage(body.detail ?? body, response.statusText || `Request failed (${response.status})`));
@@ -363,8 +365,10 @@ async function downloadContent(text, title, filename) {
   $("status").textContent = "Preparing the DOCX file...";
   try {
     const planKey = window.ArticleReadyPayments ? ArticleReadyPayments.selectedDraftPlan() : '';
-    const headers = {"Content-Type":"application/json", ...(window.ArticleReadyPayments ? ArticleReadyPayments.paymentHeaders(planKey) : {})};
-    const response = await fetch("/api/articles/export", {method:"POST", headers, body:JSON.stringify({article_title:title, article_text:text})});
+    const requestInit = {method:"POST", headers:{"Content-Type":"application/json", Accept:"application/json"}, body:JSON.stringify({article_title:title, article_text:text})};
+    const response = window.ArticleReadyPayments
+      ? await ArticleReadyPayments.authorisedFetch("/api/articles/export", requestInit, planKey)
+      : await fetch("/api/articles/export", requestInit);
     if (response.status === 402 && window.ArticleReadyPayments) { const data = await readApiResponse(response); ArticleReadyPayments.openFromApi(data.detail || {}); return; }
     if (!response.ok) { const data = await readApiResponse(response); throw new Error(apiErrorMessage(data.detail ?? data, response.statusText || `Request failed (${response.status})`)); }
     const blob = await response.blob(); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); $("status").textContent = "DOCX downloaded.";
