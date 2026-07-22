@@ -1,5 +1,6 @@
-.env
 __pycache__/
 *.pyc
+.env
+*.db
 .pytest_cache/
-.venv/
+test_review_storage/

@@ -1,74 +1,401 @@
+databases:
+  - name: vprofessor-db
+    plan: basic-256mb
+
 services:
   - type: web
-    name: articleready-ai
+    name: vprofessor-web
     runtime: python
-    region: oregon
-    plan: starter
-    buildCommand: python -m pip install --upgrade pip setuptools wheel && python -m pip install -r requirements.txt
+    plan: standard
+    buildCommand: python -m pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
-    disk:
-      name: articleready-data
-      mountPath: /var/data
-      sizeGB: 1
-    envVars:
+    envVars: &vprofessorEnv
       - key: PYTHON_VERSION
         value: 3.12.11
-      - key: DEEPSEEK_API_KEY
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: COOKIE_SECURE
+        value: true
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD
         sync: false
-      - key: DEEPSEEK_ARTICLE_IDEA_MODEL
-        value: deepseek-v4-pro
-      - key: DEEPSEEK_ARTICLE_IDEA_THINKING
-        value: "1"
-      - key: DEEPSEEK_ARTICLE_IDEA_REASONING_EFFORT
-        value: high
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_NAME
+        value: System Administrator
+      - key: VPROF_RESET_ADMIN_PASSWORD_ON_STARTUP
+        value: false
+      - key: VPROF_ADMIN_REQUIRE_PASSWORD_CHANGE_AFTER_RESET
+        value: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: vprofessor-db
+          property: connectionString
+      - key: REVIEW_STORAGE_DIR
+        value: /tmp/vprofessor/reviews
+      - key: REVIEW_STORAGE_FALLBACK_DIR
+        value: /tmp/vprofessor/reviews
+      - key: VPROF_DB_ARTIFACT_STORAGE
+        value: true
+      - key: VPROF_RUN_JOBS_IN_WEB
+        value: false
       - key: OPENAI_API_KEY
         sync: false
-      - key: OPENAI_ARTICLE_TERRA_MODEL
+      - key: OPENAI_BASE_URL
+        value: https://api.openai.com/v1
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: DEEPSEEK_BASE_URL
+        value: https://api.deepseek.com
+      - key: AI_REVIEW_ENABLED
+        value: true
+      - key: VPROF_ENABLE_OPENAI
+        value: true
+      - key: VPROF_ENABLE_DEEPSEEK
+        value: false
+      - key: VPROF_PRIMARY_PROVIDER
+        value: openai
+      - key: VPROF_FALLBACK_PROVIDER
+        value: none
+      - key: VPROF_PROVIDER_FAILOVER
+        value: false
+      - key: DEEPSEEK_REVIEW_MODEL
+        value: deepseek-v4-pro
+      - key: DEEPSEEK_ADVANCED_MODEL
+        value: deepseek-v4-pro
+      - key: DEEPSEEK_QUALITY_MODEL
+        value: deepseek-v4-pro
+      - key: DEEPSEEK_FAST_MODEL
+        value: deepseek-v4-flash
+      - key: DEEPSEEK_THINKING_ENABLED
+        value: true
+      - key: DEEPSEEK_PRIMARY_THINKING_ENABLED
+        value: false
+      - key: DEEPSEEK_AUDIT_THINKING_ENABLED
+        value: true
+      - key: DEEPSEEK_REASONING_EFFORT
+        value: high
+      - key: DEEPSEEK_ADVANCED_PRIMARY_REASONING_EFFORT
+        value: max
+      - key: DEEPSEEK_TRUNCATION_RECOVERY
+        value: true
+      - key: DEEPSEEK_TRUNCATION_RETRY_MULTIPLIER
+        value: "1.6"
+      - key: DEEPSEEK_MAX_OUTPUT_TOKENS
+        value: 12000
+      - key: DEEPSEEK_PRIMARY_MAX_OUTPUT_TOKENS
+        value: 7000
+      - key: DEEPSEEK_SINGLE_TARGET_RECOVERY_MAX_OUTPUT_TOKENS
+        value: 4200
+      - key: DEEPSEEK_COMPACT_ISSUE_LIMIT_PER_TARGET
+        value: 2
+      - key: DEEPSEEK_COVERAGE_PARAGRAPHS_PER_UNIT
+        value: 3
+      - key: DEEPSEEK_COVERAGE_UNIT_MAX_CHARS
+        value: 7000
+      - key: DEEPSEEK_COVERAGE_TABLE_ROWS_PER_UNIT
+        value: 4
+      - key: DEEPSEEK_COVERAGE_UNITS_PER_REQUEST
+        value: 1
+      - key: DEEPSEEK_COVERAGE_HIGH_RISK_UNITS_PER_REQUEST
+        value: 1
+      - key: DEEPSEEK_COVERAGE_REQUEST_MAX_CHARS
+        value: 9000
+      - key: PRICE_DEEPSEEK_PRO_INPUT
+        value: "0.435"
+      - key: PRICE_DEEPSEEK_PRO_CACHED_INPUT
+        value: "0.003625"
+      - key: PRICE_DEEPSEEK_PRO_OUTPUT
+        value: "0.87"
+      - key: PRICE_DEEPSEEK_FLASH_INPUT
+        value: "0.14"
+      - key: PRICE_DEEPSEEK_FLASH_CACHED_INPUT
+        value: "0.0028"
+      - key: PRICE_DEEPSEEK_FLASH_OUTPUT
+        value: "0.28"
+      - key: VPROF_ENABLE_SELECTIVE_ESCALATION
+        value: true
+      - key: VPROF_ROUTING_PROFILE
+        value: quality
+      - key: VPROF_COMBINED_APP_PIPELINE
+        value: true
+      - key: VPROF_DEFAULT_CALL_BUDGET_USD
+        value: 0.25
+      - key: VPROF_EXTERNAL_CALL_BUDGET_USD
+        value: 1.50
+      - key: OPENAI_FAST_MODEL
         value: gpt-5.6-terra
-      - key: OPENAI_ARTICLE_SOL_MODEL
-        value: gpt-5.6-sol
-      - key: OPENAI_ARTICLE_REVISION_MODEL
-        value: gpt-5.6-sol
-      - key: OPENAI_ARTICLE_HUMANIZER_MODEL
+      - key: OPENAI_CLEANING_MODEL
         value: gpt-5.6-terra
-      - key: ARTICLEREADY_HUMANIZER_MODE
-        value: balanced
-      - key: ARTICLEREADY_HUMANIZER_MODEL_PASS
-        value: "1"
-      - key: OPENALEX_MAILTO
-        value: aadam@ucc.edu.gh
-      - key: CROSSREF_MAILTO
-        value: aadam@ucc.edu.gh
-
-      - key: ARTICLEREADY_PAYMENT_REQUIRED
-        value: "1"
-      - key: APP_BASE_URL
-        value: https://articlereadyai.com
-      - key: ARTICLEREADY_SQLITE_DB_PATH
-        value: /var/data/articleready_payments.db
-      - key: ARTICLEREADY_REVIEW_DB_PATH
-        value: /var/data/articleready_review_workspace.db
-      - key: PAYSTACK_SECRET_KEY
-        sync: false
-      - key: STRIPE_SECRET_KEY
-        sync: false
-      - key: STRIPE_WEBHOOK_SECRET
-        sync: false
-      - key: ARTICLEREADY_PAYSTACK_USD_TO_GHS_RATE
+      - key: OPENAI_CHAPTER_MODEL
+        value: gpt-5.6-terra
+      - key: OPENAI_SECTION_ANALYSIS_MODEL
+        value: gpt-5.6-terra
+      - key: OPENAI_SECTION_ANALYSIS_FALLBACK_MODEL
+        value: gpt-5.6-terra
+      - key: OPENAI_EXPERT_MODEL
+        value: gpt-5.6-terra
+      - key: OPENAI_FINAL_AUDIT_MODEL
+        value: gpt-5.6-terra
+      - key: OPENAI_FINAL_SYNTHESIS_MODEL
+        value: gpt-5.6-terra
+      - key: OPENAI_FINAL_SYNTHESIS_FALLBACK_MODEL
+        value: gpt-5.6-terra
+      - key: OPENAI_PHD_FINAL_SYNTHESIS_MODEL
+        value: gpt-5.6-sol
+      - key: OPENAI_PHD_FINAL_SYNTHESIS_REASONING_EFFORT
+        value: high
+      - key: OPENAI_EXTERNAL_DOMAIN_MODEL
+        value: gpt-5.6-terra
+      - key: OPENAI_EXTERNAL_ADJUDICATOR_MODEL
+        value: gpt-5.6-sol
+      - key: PRICE_OPENAI_TERRA_INPUT
+        value: "2.50"
+      - key: PRICE_OPENAI_TERRA_CACHED_INPUT
+        value: "0.25"
+      - key: PRICE_OPENAI_TERRA_OUTPUT
         value: "15.00"
-      - key: ARTICLEREADY_DEVELOPER_ACCESS_ENABLED
-        value: "0"
-      - key: ARTICLEREADY_DEVELOPER_ACCESS_EMAIL
-        sync: false
-      - key: ARTICLEREADY_DEVELOPER_ACCESS_CODE_SHA256
-        sync: false
-      - key: ARTICLEREADY_DEVELOPER_ACCESS_SECRET
-        sync: false
-      - key: ARTICLEREADY_DEVELOPER_SESSION_HOURS
-        value: "12"
+      - key: PRICE_OPENAI_SOL_INPUT
+        value: "5.00"
+      - key: PRICE_OPENAI_SOL_CACHED_INPUT
+        value: "0.50"
+      - key: PRICE_OPENAI_SOL_OUTPUT
+        value: "30.00"
+      - key: OPENAI_CHAPTER_REASONING_EFFORT
+        value: medium
+      - key: OPENAI_EXPERT_REASONING_EFFORT
+        value: high
+      - key: OPENAI_FINAL_AUDIT_REASONING_EFFORT
+        value: medium
+      - key: OPENAI_NON_RESEARCH_MASTERS_AUDIT_REASONING_EFFORT
+        value: medium
+      - key: OPENAI_RESEARCH_MASTERS_AUDIT_REASONING_EFFORT
+        value: high
+      - key: OPENAI_PROFESSIONAL_DOCTORATE_AUDIT_REASONING_EFFORT
+        value: high
+      - key: OPENAI_PHD_AUDIT_REASONING_EFFORT
+        value: high
+      - key: OPENAI_EXTERNAL_DOMAIN_REASONING_EFFORT
+        value: high
+      - key: OPENAI_EXTERNAL_ADJUDICATOR_REASONING_EFFORT
+        value: high
+      - key: AI_MAX_PARALLEL_CALLS
+        value: 2
+      - key: AI_CHAPTER_REVIEW_CONCURRENCY
+        value: 2
+      - key: AI_CHAPTER_RECOVERY_CONCURRENCY
+        value: 1
+      - key: AI_CHAPTER_PACKET_MAX_CHARS
+        value: 60000
+      - key: AI_CHAPTER_RECOVERY_MAX_OUTPUT_TOKENS
+        value: 4500
+      - key: AI_LIGHT_MAX_OUTPUT_TOKENS
+        value: 3000
+      - key: AI_STANDARD_MAX_OUTPUT_TOKENS
+        value: 4800
+      - key: AI_NON_RESEARCH_MASTERS_MAX_OUTPUT_TOKENS
+        value: 5800
+      - key: AI_RESEARCH_MASTERS_MAX_OUTPUT_TOKENS
+        value: 6800
+      - key: AI_PROFESSIONAL_DOCTORATE_MAX_OUTPUT_TOKENS
+        value: 7600
+      - key: AI_PHD_MAX_OUTPUT_TOKENS
+        value: 8200
+      - key: AI_ADVANCED_MAX_OUTPUT_TOKENS
+        value: 9000
+      - key: AI_LIGHT_AUDIT_MAX_OUTPUT_TOKENS
+        value: 2600
+      - key: AI_STANDARD_AUDIT_MAX_OUTPUT_TOKENS
+        value: 2600
+      - key: AI_NON_RESEARCH_MASTERS_AUDIT_MAX_OUTPUT_TOKENS
+        value: 3200
+      - key: AI_RESEARCH_MASTERS_AUDIT_MAX_OUTPUT_TOKENS
+        value: 4200
+      - key: AI_PROFESSIONAL_DOCTORATE_AUDIT_MAX_OUTPUT_TOKENS
+        value: 4800
+      - key: AI_PHD_AUDIT_MAX_OUTPUT_TOKENS
+        value: 5500
+      - key: AI_EXTERNAL_ASSESSMENT_FOUNDATION_MAX_OUTPUT_TOKENS
+        value: 5500
+      - key: AI_EXTERNAL_ASSESSMENT_EVIDENCE_MAX_OUTPUT_TOKENS
+        value: 5500
+      - key: AI_EXTERNAL_ASSESSMENT_INTEGRITY_MAX_OUTPUT_TOKENS
+        value: 4500
+      - key: AI_EXTERNAL_ASSESSMENT_ADJUDICATION_MAX_OUTPUT_TOKENS
+        value: 7500
+      - key: AI_TIMEOUT_SECONDS
+        value: 300
+      - key: AI_FAST_REQUEST_TIMEOUT_SECONDS
+        value: 180
+      - key: AI_FAST_REQUEST_MAX_RETRIES
+        value: 1
+      - key: AI_EXTERNAL_ASSESSMENT_REQUEST_MAX_RETRIES
+        value: 1
+      - key: AI_MAX_RETRIES
+        value: 1
+      - key: AI_STRUCTURED_OUTPUT_RETRIES
+        value: 1
+      - key: AI_STRICT_FAILURE
+        value: true
+      - key: AI_FAST_AUDIT_BATCH_ISSUE_LIMIT
+        value: 6
+      - key: AI_FAST_AUDIT_MAX_BATCHES
+        value: 1
+      - key: AI_MAX_MAP_INPUT_CHARS
+        value: 60000
+      - key: AI_JOB_MAX_SECONDS
+        value: 5400
+      - key: AI_ADVANCED_SECOND_PASS
+        value: true
+      - key: AUTO_RESUME_JOBS
+        value: true
+      - key: MAX_AUTO_RESUMES
+        value: 2
+      - key: JOB_HEARTBEAT_SECONDS
+        value: 30
+      - key: JOB_LEASE_SECONDS
+        value: 180
+      - key: JOB_STALE_AFTER_SECONDS
+        value: 240
+      - key: RECOVERY_STALLED_AFTER_SECONDS
+        value: 600
+      - key: CLIENT_AUTO_RECOVERY_SECONDS
+        value: 600
+      - key: VPROF_WORKER_CONCURRENCY
+        value: 1
+      - key: VPROF_WORKER_CLAIM_LIMIT
+        value: 1
+      - key: VPROF_WORKER_POLL_SECONDS
+        value: 8
+      - key: VPROF_ALL_LEVELS_DEGREE_CALIBRATED
+        value: true
+      - key: VPROF_RESEARCH_MASTERS_DEEP_REVIEW
+        value: true
+      - key: VPROF_REJECT_PLACEHOLDER_COMMENTS
+        value: true
+      - key: VPROF_SUPPRESS_INTERNAL_AUDIT_NOTICES
+        value: true
+      - key: VPROF_COMMENT_MAX_CHARS
+        value: 900
+      - key: VPROF_GROUPED_COMMENT_MAX_CHARS
+        value: 8000
+      - key: VPROF_INLINE_COMMENT_MAX_CHARS
+        value: 480
+      - key: VPROF_COMMENT_SIMILARITY_THRESHOLD
+        value: 0.92
+      - key: VPROF_DEVELOPMENTAL_COMMENTS
+        value: true
+      - key: VPROF_COMMENT_DEPTH_FLOOR_ENABLED
+        value: false
+      - key: VPROF_SYSTEMATIC_COVERAGE_REVIEW
+        value: true
+      - key: VPROF_STUDENT_FRIENDLY_COMMENTS
+        value: true
+      - key: VPROF_CONTEXT_SPECIFIC_EXAMPLES
+        value: true
+      - key: VPROF_STATISTICAL_TABLE_AUDIT
+        value: true
+      - key: VPROF_ANALYSIS_APPROPRIATENESS_AUDIT
+        value: true
+      - key: VPROF_SPEC_ALIGNED_SUPERVISORY_REPORT
+        value: true
+      - key: VPROF_MEASUREMENT_AUDIT
+        value: true
+      - key: VPROF_COVERAGE_PARAGRAPHS_PER_UNIT
+        value: 8
+      - key: VPROF_COVERAGE_CONTEXT_PARAGRAPHS
+        value: 1
+      - key: VPROF_COVERAGE_UNIT_MAX_CHARS
+        value: 12000
+      - key: VPROF_COVERAGE_TABLE_ROWS_PER_UNIT
+        value: 10
+      - key: VPROF_COVERAGE_UNITS_PER_REQUEST
+        value: 6
+      - key: VPROF_COVERAGE_HIGH_RISK_UNITS_PER_REQUEST
+        value: 3
+      - key: VPROF_COVERAGE_REQUEST_MAX_CHARS
+        value: 36000
+      - key: VPROF_COVERAGE_RELEASE_GATE
+        value: true
+      - key: VPROF_STANDARD_NON_RESEARCH_MIN_FINDINGS
+        value: 0
+      - key: VPROF_STANDARD_RESEARCH_MASTERS_MIN_FINDINGS
+        value: 0
+      - key: VPROF_STANDARD_PROFESSIONAL_DOCTORATE_MIN_FINDINGS
+        value: 0
+      - key: VPROF_STANDARD_PHD_MIN_FINDINGS
+        value: 0
+      - key: VPROF_DETERMINISTIC_SUPERVISORY_CHECKLIST
+        value: true
+      - key: VPROF_NATIVE_COMMENT_STYLE
+        value: exact_anchor_grouped
+      - key: VPROF_EXISTING_COMMENT_POLICY
+        value: label
+      - key: VPROF_GROUP_SAME_ANCHOR_COMMENTS
+        value: true
+      - key: VPROF_EXPORT_ONE_COMMENT_PER_FINDING
+        value: false
+      - key: VPROF_COMMENT_MERGE_BY_SECTION
+        value: false
+      - key: VPROF_MAX_ITEMS_PER_NATIVE_COMMENT
+        value: 20
+      - key: VPROF_INCLUDE_SECTION_REVIEW_COMMENTS
+        value: false
+      - key: VPROF_SPLIT_RELATED_CONCERNS_INTO_SEPARATE_COMMENTS
+        value: false
+      - key: VPROF_ADD_QUALITY_EXPECTATION_TO_COMMENTS
+        value: false
+      - key: VPROF_INCLUDE_DEGREE_LABEL_IN_COMMENTS
+        value: false
+      - key: VPROF_REPORT_INCLUDE_DETAILED_FINDINGS
+        value: true
+      - key: VPROF_REPORT_MAX_DETAILED_FINDINGS
+        value: 100
+      - key: VPROF_REQUIRED_SECTION_RELEASE_RECONCILIATION
+        value: true
+      - key: VPROF_FULL_DOCUMENT_COMPONENT_AUDIT
+        value: true
+      - key: VPROF_UCC_SECTION_CONTRACT_MAX_ISSUES
+        value: 500
+      - key: VPROF_UCC_SECTION_COVERAGE_CONTRACT
+        value: true
+      - key: VPROF_PRESERVE_UCC_SECTION_COMMENTS
+        value: true
+      - key: VPROF_HUMAN_SUPERVISORY_EDITOR
+        value: true
+      - key: VPROF_HUMAN_ROOT_CAUSE_CONSOLIDATION
+        value: true
+      - key: VPROF_HUMAN_JUDGEMENT_PASS
+        value: true
+      - key: VPROF_SEMANTIC_EXAMPLE_GATE
+        value: true
+      - key: VPROF_CONTEXTUAL_ALIGNMENT_EXAMPLES
+        value: true
+      - key: VPROF_SCOPE_COMPLETENESS_AUDIT
+        value: true
+      - key: VPROF_MICRO_LANGUAGE_CITATION_AUDIT
+        value: true
+      - key: VPROF_EXPORT_ANCHOR_RECONCILIATION
+        value: true
+      - key: VPROF_SCOPE_CONFLICT_AUDIT
+        value: true
+      - key: VPROF_STRICT_CONTEXT_EXAMPLE_VALIDATION
+        value: true
+      - key: VPROF_PROFESSIONAL_REVIEW_APPENDIX
+        value: true
+      - key: VPROF_NATIVE_GROUP_LOCATION_MARKERS
+        value: false
+      - key: TOKEN_ACCOUNTING_ENABLED
+        value: true
+      - key: TOKEN_QUOTA_ENFORCEMENT
+        value: false
 
-# Long article and batch writing optional environment variables:
-# ARTICLEREADY_BATCH_DRAFT_WORD_THRESHOLD=6500
-# ARTICLEREADY_ARTICLE_MAX_OUTPUT_TOKENS=24000
-# ARTICLEREADY_ARTICLE_HARD_OUTPUT_CAP=60000
+  - type: worker
+    name: vprofessor-worker
+    runtime: python
+    plan: standard
+    buildCommand: python -m pip install -r requirements.txt
+    startCommand: python -m app.worker
+    envVars: *vprofessorEnv

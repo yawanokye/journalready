@@ -1,246 +1,86 @@
-# ArticleReady AI
+# V-Professor Supervisory Review 2.5.0
 
-ArticleReady AI is a standalone FastAPI application for article-topic development, staged manuscript writing, article polishing and revision, research-resource guidance and DOCX export. It remains separate from ProjectReady AI, which is focused on theses, dissertations and project chapters.
+V-Professor provides degree-calibrated supervisory review and external assessment for Bachelor’s, Non-Research Master’s, Research Master’s/MPhil, Professional Doctorate and PhD work.
 
-## Main workflows
+## Current-submission-only review
 
-### 1. Article Topic Ideas
+Every uploaded work is treated as evidence for that review job only. A thesis, dissertation, chapter or benchmark used to test the system is an example, not a reusable model for later submissions.
 
-The `/topic-ideas` page develops publication-focused ideas from a thesis, dissertation, completed project, existing dataset or a new independent study. Each idea includes:
+V-Professor therefore:
 
-- focused article title, angle and article-level gap
-- one overall objective with aligned questions or hypotheses
-- contribution, journal fit and method route
-- readiness score and evidence still needed
-- identified research route
-- possible official secondary datasets where secondary research is suitable
-- possible questionnaire, scale, interview-guide or instrument sources where primary or qualitative research is suitable
-- direct DOCX export of the complete topic-idea portfolio, research-resource guidance and retained source records
-- warnings on access, licensing, adaptation, validity and salami slicing
+- builds the study context afresh from the current title, purpose, objectives, questions, scope and submitted chapters;
+- does not retain names, institutions, locations, constructs, sectors, examples or detected weaknesses as rules for another job;
+- keeps earlier chapters only when they belong to the same submission and are supplied for alignment;
+- removes sample, benchmark, learned-rule and prior-submission fields before provider calls and before the final finding ledger;
+- applies only generic academic, methodological, statistical, language and citation standards across jobs.
 
-Candidate resources are not automatic endorsements. Users must verify variable coverage, time and geographic coverage, population fit, access conditions, copyright or licence terms, ethics and validation requirements.
+## Natural and reconciled comments
 
-For a **new independent article**, thesis and dissertation fields are hidden and removed from the backend payload. The topic-idea prompt and structured fallback use proposal language only. Macroeconomic, financial-market, interest-rate, yield-curve, bond and exchange-rate topics default to secondary or archival data unless the user explicitly selects another route.
+Native Word comments and inline annotations use connected supervisory prose. They do not expose mechanical labels such as `Issue`, `Problem identified`, `Action required` or `Verification`.
 
-Scholarly records now pass a conservative topic-relevance gate before they are shown or sent to the idea model. Country-only matches, records sharing only one broad word, and discipline-mismatched ERIC results are excluded. The app prefers a short relevant list to a long noisy list.
+Related concerns with one root cause are consolidated before numbering. Findings attached to the same exact paragraph share one numbered comment box. Every released finding number must appear in the annotated output and in the appended correction register.
 
-#### AI provider for article ideas
+Comments already present in an uploaded Word document are retained but labelled as previous source-document comments so that they are not mistaken for the current V-Professor review.
 
-Article Topic Ideas use **DeepSeek V4 Pro** through the official DeepSeek OpenAI-compatible API. This provider is isolated to `app/article_ideas_service.py`. The Article Writer continues to use the configured OpenAI models. If `DEEPSEEK_API_KEY` is missing or a DeepSeek request fails, the topic-idea workflow uses its structured fallback rather than switching silently to OpenAI.
+## Accuracy controls in 2.5.0
 
-### 2. Article Writer
+- Reads the complete section before declaring content missing.
+- Preserves verified section-contract findings while suppressing heuristic false positives.
+- Distinguishes present-but-weak content from absent content.
+- Does not require hypotheses unless the programme contract or confirmed methodology requires them.
+- Detects research design and submission stage before applying methodology or results checks.
+- Consolidates repeated background, problem-gap, construct-definition, significance, framework and regression-protocol findings.
+- Generates study-specific actions from the current submission without hardcoded topic, institution or location examples.
+- Separates current findings from older comments embedded in the source document.
 
-The `/article-writer` page now supports three writing stages:
+## Provider selection and cost control
 
-1. **Full article from a completed study**
-2. **Stage 1: Develop a new article up to Methods**
-3. **Stage 2: Complete the article after results or analysis**
+Use the same provider settings on the web service and worker.
 
-When **Develop as a new independent article** is selected:
+OpenAI:
 
-- thesis, dissertation and project source fields are disabled
-- PhD is selected as the default research depth
-- the default workflow changes to Stage 1
-- the manuscript body is limited to Title through Methods
-- Results, Discussion and Conclusion are withheld until evidence is supplied
-- possible secondary data sources or instrument sources are listed
-- an optional provisional questionnaire, interview guide or measurement plan can be produced separately
+```env
+VPROF_PRIMARY_PROVIDER=openai
+VPROF_ENABLE_OPENAI=true
+VPROF_ENABLE_DEEPSEEK=false
+OPENAI_API_KEY=your-key
+VPROF_FALLBACK_PROVIDER=none
+VPROF_PROVIDER_FAILOVER=false
+```
 
-For Stage 2, users can upload or paste the earlier article sections and completed analysis. Supported uploads are DOCX, text-based PDF, XLSX, CSV, TXT, MD, RTF, LOG and JSON. The app extracts the text for review, then integrates the previous sections and confirmed results into a completed article.
+DeepSeek Pro route:
 
-#### Long article and batch writing
+```env
+VPROF_PRIMARY_PROVIDER=deepseek
+VPROF_ENABLE_DEEPSEEK=true
+VPROF_ENABLE_OPENAI=false
+DEEPSEEK_API_KEY=your-key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_REVIEW_MODEL=deepseek-v4-pro
+DEEPSEEK_ADVANCED_MODEL=deepseek-v4-pro
+DEEPSEEK_QUALITY_MODEL=deepseek-v4-pro
+DEEPSEEK_FAST_MODEL=deepseek-v4-flash
+DEEPSEEK_PRIMARY_THINKING_ENABLED=false
+DEEPSEEK_AUDIT_THINKING_ENABLED=true
+DEEPSEEK_TRUNCATION_RECOVERY=true
+DEEPSEEK_COVERAGE_UNITS_PER_REQUEST=1
+DEEPSEEK_COVERAGE_HIGH_RISK_UNITS_PER_REQUEST=1
+VPROF_FALLBACK_PROVIDER=none
+VPROF_PROVIDER_FAILOVER=false
+```
 
-The Article Writer includes a length and structure control. Users can set a target word count, enter a journal-specific article structure with section word targets, and choose between Auto, Single pass and Batch writing. Auto uses batch drafting when the target manuscript is long, currently 6,500 words or more. Batch writing drafts the article section by section so a 7,000-9,000 word manuscript can be developed with stronger depth and less risk of ending as a short outline.
+## Deployment
 
-The backend returns `article_length_plan`, `token_budget_estimate`, `batch_drafting_applied` and `drafting_passes` with each draft response. These values support token-based pricing and usage display.
-
-### 3. Scholarly source attachment
-
-Users can search OpenAlex, Crossref and Semantic Scholar before drafting. ERIC is searched only for education-related topics. Returned records are deduplicated, filtered for detected retractions or withdrawals, attached to the evidence bank and passed through a relevance gate. Attached sources enrich the user's evidence rather than replacing it.
-
-### 4. Article Polishing and Revision
-
-The `/article-revision` page revises an existing manuscript at PhD-level depth while preserving confirmed evidence. Users can upload or paste the article, add target-journal requirements and optionally paste or upload reviewer comments. The module can:
-
-- strengthen conceptualisation, theoretical framing and construct logic
-- clarify theoretical, empirical, methodological, contextual and practical contribution
-- assess alignment among the problem, objectives, design, sampling, measurement and claims
-- assess whether the analysis is appropriate for the stated claims
-- recommend additional diagnostics, robustness, sensitivity, endogeneity, mediation, moderation, heterogeneity, validity or trustworthiness analysis where suitable
-- rebuild the Discussion around mechanisms, competing explanations, boundaries and literature comparison
-- sharpen implications and recommendations so they follow from confirmed findings
-- produce a revision and publishability report without guaranteeing acceptance
-- produce a response-to-reviewers matrix when comments are supplied
-- export a DOCX in which added or changed wording is blue and exact unchanged wording remains black
-
-Suggested additional analyses are never presented as completed. Missing evidence is identified as an author action. Confirmed statistics, quotations, tables and findings must not be silently changed.
-
-### 4. Review Evidence Workspace
-
-The `/review-evidence` page provides an auditable evidence ledger for systematic, scoping, conceptual, integrative and bibliometric work. It can:
-
-- create browser-protected review workspaces using a random project token
-- register formal database searches and citation-tracking routes
-- import RIS, BibTeX, CSV, TSV, XLSX and JSON exports
-- identify exact DOI/title-year duplicates and flag high-similarity title matches for confirmation
-- support title/abstract and full-text screening with reasons and reviewer notes
-- extract and attach text from PDF, DOCX and other supported full-text files
-- calculate verified record-flow counts and the final included corpus
-- export the complete ledger, included corpus, audit JSON and protocol/evidence-audit DOCX
-- transfer verified protocol fields and counts directly into the Article Writer
-
-The workspace does not treat OpenAlex, Crossref, Semantic Scholar or other ArticleReady metadata discovery results as formal review records unless the corresponding database export and search run are explicitly entered. Configure `ARTICLEREADY_REVIEW_DB_PATH=/var/data/articleready_review_workspace.db` on the existing persistent Render disk.
-
-## API routes
-
-- `POST /api/article-ideas`
-- `POST /api/article-ideas/export`
-- `POST /api/articles/research-resources`
-- `POST /api/articles/find-sources`
-- `POST /api/articles/extract-file`
-- `POST /api/articles/draft`
-- `POST /api/articles/export`
-- `POST /api/articles/revise`
-- `POST /api/articles/revision/export`
-- `POST /api/review-workspace/projects`
-- `GET/PATCH/DELETE /api/review-workspace/projects/{project_id}`
-- `POST /api/review-workspace/projects/{project_id}/imports`
-- `GET/PATCH /api/review-workspace/projects/{project_id}/records...`
-- `GET /api/review-workspace/projects/{project_id}/writer-payload`
-- `GET /api/review-workspace/projects/{project_id}/export/...`
-- `GET /health`
-
-## Local run
+Web service:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-python -m pip install --upgrade pip setuptools wheel
-python -m pip install -r requirements.txt
-cp .env.example .env
-uvicorn app.main:app --reload
+uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ```
 
-Open:
-
-- `http://127.0.0.1:8000/`
-- `http://127.0.0.1:8000/topic-ideas`
-- `http://127.0.0.1:8000/article-writer`
-- `http://127.0.0.1:8000/article-revision`
-- `http://127.0.0.1:8000/review-evidence`
-
-## Render deployment
-
-Use:
-
-- Python version: `3.12.11`
-- Build command: `python -m pip install --upgrade pip setuptools wheel && python -m pip install -r requirements.txt`
-- Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- Health check path: `/health`
-
-Add these Render environment variables:
-
-- `DEEPSEEK_API_KEY`: your DeepSeek API key
-- `DEEPSEEK_ARTICLE_IDEA_MODEL`: `deepseek-v4-pro`
-- `DEEPSEEK_ARTICLE_IDEA_THINKING`: `1`
-- `DEEPSEEK_ARTICLE_IDEA_REASONING_EFFORT`: `high`
-- `OPENAI_API_KEY`: used for article drafting, article revision and the optional model-assisted humanisation pass
-- `OPENAI_ARTICLE_TERRA_MODEL`: `gpt-5.6-terra`, used for standard drafting and humanisation
-- `OPENAI_ARTICLE_SOL_MODEL`: `gpt-5.6-sol`, used for doctoral, research-heavy, review, long and revision workflows
-- `OPENAI_ARTICLE_REVISION_MODEL`: `gpt-5.6-sol`
-- `OPENAI_ARTICLE_HUMANIZER_MODEL`: `gpt-5.6-terra`
-- `ARTICLEREADY_REVISION_USE_AI`: set to `1` to enable article revision
-- `ARTICLEREADY_HUMANIZER_MODE`: `balanced` by default; supported values are `off`, `light`, `balanced` and `deep`
-- `ARTICLEREADY_HUMANIZER_MODEL_PASS`: set to `1` to enable the preservation-gated Terra pass
-- `ARTICLEREADY_BATCH_DRAFT_WORD_THRESHOLD`: default `6500`; auto batch drafting begins at or above this target
-- `ARTICLEREADY_ARTICLE_MAX_OUTPUT_TOKENS`: default `24000`; output ceiling for one article-generation call
-- `ARTICLEREADY_ARTICLE_MATERIAL_CHARS`, `ARTICLEREADY_ARTICLE_CONTINUATION_CHARS` and `ARTICLEREADY_ARTICLE_DATA_CHARS`: input extraction limits used before drafting
-
-The additional upload dependencies are already listed in `requirements.txt`:
-
-- `python-multipart`
-- `pypdf`
-- `openpyxl`
-
-After replacing the repository files, use **Clear build cache & deploy** on Render so the new dependencies are installed.
-
-## Tests
+Background worker:
 
 ```bash
-PYTHONPATH=. pytest -q
+python -m app.worker
 ```
 
-The test suite covers article ideas, strict topic-source filtering, duplicate-query control, secondary-data guidance, independent-article wording, independent-article Stage 1, instrument drafting, Stage 2 validation, file extraction, article revision fallback, revision-package parsing and blue-revision DOCX export.
-
-## ThesisReady-derived scholarly humanisation layer
-
-Article drafting and article revision use the same preservation-gated scholarly humaniser adopted from ThesisReady. A deterministic pass improves formulaic phrasing, rhythm, paragraph variation and lexical repetition. An optional section-batched GPT-5.6 Terra pass is applied only where the diagnostic score indicates that further naturalisation is useful. Every candidate revision is rejected unless headings, citations, numbers, equations, tables, URLs, references and bracketed author-action items are preserved. Configure it with `ARTICLEREADY_HUMANIZER_MODE`, `ARTICLEREADY_HUMANIZER_MODEL_PASS`, `ARTICLEREADY_HUMANIZER_BATCH_WORDS` and the other humaniser variables in `.env.example`.
-
-## GPT-5.6 routing
-
-All OpenAI-backed ArticleReady workflows are restricted to the GPT-5.6 family. GPT-5.6 Terra handles standard and cost-balanced article work. GPT-5.6 Sol handles research-master's and doctoral articles, review/conceptual/systematic articles, long or batch articles, Stage 2 completion and article revision. Legacy GPT-5.4 or GPT-5.5 environment values are ignored by the runtime model normaliser. Article Topic Ideas remains on DeepSeek V4 Pro as a separate provider choice.
-
-
-## Pricing plans
-
-The public pricing page is available at `/pricing`. Current package structure:
-
-| Package | Price | Main entitlement | Internal token allowance |
-|---|---:|---|---:|
-| Free Trial | Free | 3 article ideas, no DOCX export | 5,000 |
-| Article Ideas | US$2.99 | Up to 20 article ideas with readiness score, contribution angle, possible data/instrument sources, overlap warnings and one DOCX export | 20,000 |
-| Stage 1 Article Builder | US$6.99 | New independent article up to Methods with framework, methods, data-source or instrument guidance and DOCX export | 45,000 |
-| Standard Full Article | US$14.99 | 7,000-9,000 word source-supported article with DOCX export and one polishing pass | 80,000 |
-| Long Article Plus | US$19.99 | 10,000-13,000 word article with batch drafting and one polishing pass | 120,000 |
-| Review / Conceptual / Scoping Article | US$24.99 | Source-heavy review, scoping, conceptual or theory article with DOCX export and one polishing pass | 150,000 |
-| Article Polishing and Revision | US$7.99 | Existing article revision with blue revised text and red action items | 60,000 |
-| Reviewer Comment Revision | US$9.99 | Revision using reviewer/editor/supervisor comments with response matrix | 75,000 |
-| Extra Revision Pass | US$4.99 | Additional polishing pass on a prior output | 35,000 |
-
-Each paid package should include one successful generation and one DOCX export within the selected plan scope. If the user exceeds the word, source or token allowance, the interface should request an upgrade before continuing.
-
-## Payment system
-
-Successful Paystack and Stripe callbacks create a short-lived, single-use payment-return handoff. The browser redeems it and rotates the access token, so payment access survives blocked or cleared pre-checkout local storage. A self-service recovery page is available at `/payment/recover` for customers who have the payment email and Purchase ID.
-
-
-ArticleReady AI includes a one-off package payment system similar to ProjectReady AI. African billing countries use Paystack, while all other billing countries use Stripe Checkout. Paid actions are enforced through ArticleReady purchase credentials saved after checkout.
-
-Set `ARTICLEREADY_PAYMENT_REQUIRED=1` in production. For local testing, set it to `0`.
-
-See `PAYMENT_SYSTEM_UPDATE.md` for plan keys, checkout routes, entitlement rules and required environment variables.
-
-
-## Restricted developer access
-
-ArticleReady AI includes a signed, time-limited developer session for testing paid workflows without consuming customer entitlements. It is disabled by default.
-
-Configure it in Render with:
-
-```text
-ARTICLEREADY_DEVELOPER_ACCESS_ENABLED=1
-ARTICLEREADY_DEVELOPER_ACCESS_EMAIL=developer@example.com
-ARTICLEREADY_DEVELOPER_ACCESS_CODE_SHA256=<sha256-of-your-private-code>
-ARTICLEREADY_DEVELOPER_ACCESS_SECRET=<long-random-signing-secret>
-ARTICLEREADY_DEVELOPER_SESSION_HOURS=12
-```
-
-Open `/developer-access`, enter the configured email and six-digit private code, and activate the session. The browser receives a signed token that is accepted for Article Ideas, Article Writer, Revision and DOCX export. Developer sessions do not create purchases or consume customer entitlements. Keep the access page, code and signing secret private.
-
-## Full synthesis articles
-
-Systematic reviews, scoping reviews, conceptual articles and bibliometric articles can be generated as complete independent articles without first using the empirical Stage 1 workflow. The app does not invent search counts, included-study results, bibliometric indicators or network outputs. Missing formal evidence remains a red `[Author action: ...]` item. In Auto mode, synthesis articles below 9,500 words use a single drafting pass to reduce request-timeout risk; longer synthesis articles use the batch workflow.
-
-
-## Humanizer, DOCX topic export and citation-density update
-
-Version 1.8.0 synchronises ArticleReady with the latest ThesisReady/ProjectReady preservation-gated scholarly humanizer. The deterministic pass and optional section-batched model pass now use the same controlled perplexity, burstiness, paragraph-variation and evidence-preservation rules. Writer and revision requests may set `humanizer_mode` to `off`, `light`, `balanced` or `deep`.
-
-Paid Article Ideas packages now include one DOCX export. Existing Article Ideas purchases are upgraded automatically during payment-table initialisation. The exported document contains the portfolio, objectives, questions or hypotheses, contribution, method route, candidate data or instrument resources, retained scholarly records and quality notes.
-
-Citation-density guidance has been raised to 10-14 citation occurrences per 1,000 words for standard articles and 16-22 for review, conceptual, systematic, scoping and bibliometric articles. Source search can retain up to 80 records, and up to 100 verified records can be passed into the drafting context. The model is instructed to audit section-level coverage before returning the manuscript and to use author-action placeholders when the verified source bank is insufficient.
-
-
-## Review protocol and evidence-audit builder, version 1.9.0
-
-Version 1.9.0 adds structured evidence-base documentation for systematic, scoping, conceptual, integrative and bibliometric papers. The Article Writer now records formal databases, exact search strings, dates and limits, eligibility, screening, appraisal, citation tracking, duplicate removal, synthesis, software and verified record-flow counts. It generates a separate DOCX-ready protocol and evidence audit, checks count arithmetic and keeps ArticleReady metadata discovery distinct from formal review searching and inclusion counts. Conceptual papers retain integrative theory-building positioning unless a genuine systematic or scoping protocol is explicitly supplied.
+Both services must use the same `DATABASE_URL`, provider choice and provider API key. Deploy the package to both services and submit unfinished reviews as new jobs because the 2.5.0 checkpoint identifiers differ from earlier releases. See `DEPLOYMENT.md` and `.env.example`.
