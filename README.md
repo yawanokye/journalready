@@ -201,3 +201,7 @@ ARTICLEREADY_DEVELOPER_SESSION_HOURS=12
 ```
 
 Open `/developer-access`, enter the configured email and private code, and activate the session. The browser receives a signed token that is accepted for Article Ideas, Article Writer, Revision and DOCX export. Developer sessions do not create purchases or consume customer entitlements. Keep the access page, code and signing secret private.
+
+## Full synthesis articles
+
+Systematic reviews, scoping reviews, conceptual articles and bibliometric articles can be generated as complete independent articles without first using the empirical Stage 1 workflow. The app does not invent search counts, included-study results, bibliometric indicators or network outputs. Missing formal evidence remains a red `[Author action: ...]` item. In Auto mode, synthesis articles below 9,500 words use a single drafting pass to reduce request-timeout risk; longer synthesis articles use the batch workflow.
