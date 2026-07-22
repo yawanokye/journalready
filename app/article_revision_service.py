@@ -12,6 +12,8 @@ from app.article_service import (
     _article_prompt_quality_pack,
     _article_reference_expectations,
     _call_openai_response_with_fallback,
+    _citation_density_report,
+    _citation_density_requirements,
     _finalise_article_text,
     _humanisation_strength,
     _humanize_article_with_model,
@@ -188,7 +190,7 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
     payload["variables_constructs"] = str(payload.get("research_area") or "")
 
     sources, blocked, search_result = _search_sources(payload)
-    source_records = _source_context(sources)[:40]
+    source_records = _source_context(sources)[:80]
     provider_errors = list(search_result.get("provider_errors") or [])
     model = _revision_model()
     client = _safe_get_openai_client()
@@ -227,6 +229,7 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
             "human_like_writing_layer": _revision_human_writing_layer(payload),
             "scholarly_source_records": source_records,
             "reference_depth_guidance": _article_reference_expectations(str(payload.get("article_type") or "")),
+            "citation_density_requirements": _citation_density_requirements(payload),
             "strict_revision_rules": [
                 "Preserve all confirmed facts, sample details, coefficients, p-values, quotations, table values, dates and study results unless the user supplied evidence that they are wrong.",
                 "Do not invent, estimate or silently alter results, data, respondent details, ethics approvals, permissions, citations, references, tables or figures.",
@@ -241,6 +244,8 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
                 "Use target-journal scope and author guidance when supplied. Respect the stated word limit and citation style.",
                 "Apply a strict relevance gate to scholarly records. Use only records that directly support the article. Never invent bibliographic details or cite a metadata record as evidence for a finding not visible in its title or abstract.",
                 "Retain existing valid citations. Do not remove a citation merely because its full record was not supplied, but flag obviously incomplete or unverifiable references in the report.",
+                "Audit citation coverage section by section. Place verified citations directly beside factual, theoretical, methodological and comparative claims, using the supplied citation-density requirements without padding or fabricating references.",
+                "When the evidence bank cannot support an under-cited claim, insert [Author action: Add a verified source that directly supports this claim.] rather than inventing a citation.",
                 "Address every reviewer comment where possible. When a comment cannot be resolved from supplied evidence, state the precise action or analysis needed rather than pretending it was completed.",
                 "Apply the human_like_writing_layer and its strong_humanisation_requirements throughout the revised manuscript, including prose, objectives, methods, equations, frameworks and references where relevant.",
                 "Use controlled high burstiness, strong but meaning-preserving lexical variation, varied paragraph openings and natural transitions.",
@@ -303,7 +308,7 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
             mode = "metadata_fallback_after_ai_error"
 
     revised_article = _finalise_article_text(revised_article)
-    humanizer_report: dict[str, Any] = {"mode": _humanizer_mode(), "applied": False}
+    humanizer_report: dict[str, Any] = {"mode": _humanizer_mode(payload), "applied": False}
     humanizer_models: list[str] = []
     if mode == "ai_revision":
         revised_article, humanizer_report, humanizer_models = _humanize_article_with_model(
@@ -315,6 +320,11 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
         revised_article = _finalise_article_text(revised_article)
     revision_report = _finalise_article_text(revision_report)
     reviewer_matrix = _finalise_article_text(reviewer_matrix) if reviewer_matrix else ""
+    citation_density = _citation_density_report(revised_article)
+    density_target = _citation_density_requirements(payload)["citation_occurrences_per_1000_words"]
+    citation_density["minimum_target"] = int(density_target["minimum"])
+    citation_density["preferred_target"] = int(density_target["target"])
+    citation_density["meets_minimum"] = float(citation_density.get("citation_occurrences_per_1000_words") or 0) >= int(density_target["minimum"])
 
     return {
         "revised_article_text": revised_article,
@@ -332,6 +342,7 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
         "humanisation_strength": _humanisation_strength(),
         "humanizer_report": humanizer_report,
         "humanizer_models_used": humanizer_models,
+        "citation_density_report": citation_density,
         "quality_filters": [
             "The same strong human-supervised academic writing layer used by the Article Writer is applied to article revision.",
             "The post-processing pass is deterministic and protects confirmed evidence, citations, tables, equations, placeholders and references.",

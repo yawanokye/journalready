@@ -10,6 +10,7 @@ ARTICLE_TYPES = (
     "Systematic review",
     "Scoping review",
     "Conceptual article",
+    "Bibliometric article",
     "Methodological article",
     "Case study article",
     "Policy or practice article",
@@ -48,6 +49,33 @@ class ArticleIdeaRequest(BaseModel):
     @classmethod
     def validate_resource_limit(cls, value: int) -> int:
         return max(3, min(int(value), 12))
+
+
+class ArticleIdeasExportRequest(BaseModel):
+    research_area: str = "Article Topic Ideas"
+    source_mode: str = ""
+    article_type: str = ""
+    target_journal: str = ""
+    context: str = ""
+    portfolio_note: str = ""
+    ideas: list[dict[str, Any]] = Field(default_factory=list)
+    research_resources: dict[str, Any] = Field(default_factory=dict)
+    source_records_used: list[dict[str, Any]] = Field(default_factory=list)
+    quality_filters: list[str] = Field(default_factory=list)
+    provider_errors: list[Any] = Field(default_factory=list)
+
+    @field_validator("ideas")
+    @classmethod
+    def validate_ideas(cls, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        cleaned = [item for item in value if isinstance(item, dict)][:20]
+        if not cleaned:
+            raise ValueError("Generate at least one article idea before exporting.")
+        return cleaned
+
+    @field_validator("source_records_used")
+    @classmethod
+    def validate_source_records(cls, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [item for item in value if isinstance(item, dict)][:100]
 
 
 class ResearchResourceRequest(BaseModel):
@@ -95,7 +123,7 @@ class ArticleSourceSearchRequest(BaseModel):
     @field_validator("max_results")
     @classmethod
     def validate_max_results(cls, value: int) -> int:
-        return max(3, min(int(value), 30))
+        return max(3, min(int(value), 80))
 
 
 class JournalArticleRequest(BaseModel):
@@ -130,6 +158,7 @@ class JournalArticleRequest(BaseModel):
     article_structure: str = ""
     long_write_mode: str = "auto"
     citation_style: str = "APA 7th"
+    humanizer_mode: str = "balanced"
     include_source_search: bool = True
     include_older_foundational: bool = True
     include_research_resource_search: bool = True
@@ -162,6 +191,12 @@ class JournalArticleRequest(BaseModel):
         allowed = {"auto", "single_pass", "batch"}
         return value if value in allowed else "auto"
 
+    @field_validator("humanizer_mode")
+    @classmethod
+    def validate_humanizer_mode(cls, value: str) -> str:
+        normalised = str(value or "balanced").strip().lower()
+        return normalised if normalised in {"off", "light", "balanced", "deep"} else "balanced"
+
 
 class ArticleExportRequest(BaseModel):
     article_title: str = "Journal Article Draft"
@@ -177,6 +212,7 @@ class ArticleRevisionRequest(BaseModel):
     author_guidelines: str = ""
     article_type: str = "Empirical research article"
     citation_style: str = "APA 7th"
+    humanizer_mode: str = "balanced"
     word_limit: str = ""
     research_area: str = ""
     context: str = ""
@@ -212,6 +248,12 @@ class ArticleRevisionRequest(BaseModel):
             "Publication-readiness overhaul",
         }
         return value if value in allowed else "Publication-readiness overhaul"
+
+    @field_validator("humanizer_mode")
+    @classmethod
+    def validate_revision_humanizer_mode(cls, value: str) -> str:
+        normalised = str(value or "balanced").strip().lower()
+        return normalised if normalised in {"off", "light", "balanced", "deep"} else "balanced"
 
 
 class ArticleRevisionExportRequest(BaseModel):

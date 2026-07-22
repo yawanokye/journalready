@@ -6,6 +6,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.article_ideas_service import generate_article_ideas
+from app.article_ideas_export import export_article_ideas_docx
 from app.article_service import draft_journal_article, export_article_docx, find_article_sources
 from app.article_revision_service import export_revised_article_docx, revise_article
 from app.file_extractor import extract_uploaded_text
@@ -14,6 +15,7 @@ from app.payments.guard import PaymentRequiredError, credentials_from_headers, m
 from app.schemas import (
     ArticleExportRequest,
     ArticleIdeaRequest,
+    ArticleIdeasExportRequest,
     ArticleRevisionExportRequest,
     ArticleRevisionRequest,
     ArticleSourceSearchRequest,
@@ -83,6 +85,39 @@ def create_article_ideas(payload: ArticleIdeaRequest, request: Request) -> dict[
         raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Article topic generation failed: {str(exc)[:240]}") from exc
+
+
+@router.post("/article-ideas/export")
+def export_article_ideas(payload: ArticleIdeasExportRequest, request: Request) -> StreamingResponse:
+    try:
+        creds = credentials_from_headers(request.headers)
+        try:
+            with paid_article_action(
+                purchase_id=creds["purchase_id"],
+                access_token=creds["access_token"],
+                developer_token=creds["developer_token"],
+                action="export",
+                metadata={
+                    "plan_recommended": "article_ideas",
+                    "export_type": "article_topic_ideas",
+                    "research_area": payload.research_area,
+                    "idea_count": len(payload.ideas),
+                },
+            ):
+                stream, filename = export_article_ideas_docx(payload.model_dump())
+        except PaymentRequiredError as exc:
+            raise _payment_exception("export", "article_ideas", str(exc)) from exc
+        return StreamingResponse(
+            stream,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Article topic export failed: {str(exc)[:240]}") from exc
 
 
 @router.post("/articles/research-resources")

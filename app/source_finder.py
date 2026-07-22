@@ -86,7 +86,7 @@ def search_literature_sources(
     if not final_query:
         raise ValueError("Please provide a project title, research area, objective, or search terms before finding sources.")
 
-    max_results = max(3, min(int(max_results or 12), 30))
+    max_results = max(3, min(int(max_results or 12), 80))
     current_year = datetime.now().year
     recent_start_year = current_year - 5
 

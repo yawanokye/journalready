@@ -28,7 +28,7 @@ from app.scholarly_humanizer import (
 # Dynamic source context defaults are controlled through helpers below.  Keep this
 # reasonably high because journal articles need deeper citation coverage than a
 # thesis chapter subsection.
-MAX_SOURCE_CONTEXT = int(os.getenv("ARTICLEREADY_ARTICLE_MAX_SOURCE_CONTEXT", "80"))
+MAX_SOURCE_CONTEXT = int(os.getenv("ARTICLEREADY_ARTICLE_MAX_SOURCE_CONTEXT", "100"))
 
 _RETRACTION_TERMS = re.compile(
     r"\b(retracted|retraction\s+notice|withdrawn|removed\s+article|expression\s+of\s+concern|erratum\s+to\s+retracted)\b",
@@ -536,24 +536,31 @@ def _expert_professor_requirements(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _citation_density_requirements(payload: dict[str, Any]) -> dict[str, Any]:
     article_type = str(payload.get("article_type") or "").lower()
-    if any(token in article_type for token in ["systematic", "scoping", "review", "meta-analysis", "meta analysis"]):
-        overall = {"minimum": 12, "target": 18}
+    synthesis = any(token in article_type for token in [
+        "systematic", "scoping", "review", "meta-analysis", "meta analysis",
+        "conceptual", "theory", "bibliometric", "scientometric",
+    ])
+    if synthesis:
+        overall = {"minimum": 16, "target": 22}
     elif any(token in article_type for token in ["short", "brief", "communication"]):
-        overall = {"minimum": 5, "target": 8}
+        overall = {"minimum": 7, "target": 10}
     else:
-        overall = {"minimum": 8, "target": 12}
+        overall = {"minimum": 10, "target": 14}
     return {
         "citation_occurrences_per_1000_words": overall,
         "section_guidance": {
-            "Introduction": "8-12 citation occurrences per 1,000 words, concentrated on factual context, problem evidence, gap and contribution claims.",
-            "Literature Review or Theoretical Background": "12-18 citation occurrences per 1,000 words, with synthesis across studies rather than one-author summaries.",
-            "Methods": "5-8 citation occurrences per 1,000 words for design, measurement, sampling, analytical and reporting choices that require authority.",
-            "Discussion": "8-12 citation occurrences per 1,000 words, positioned directly beside comparisons, mechanisms, contradictions and boundary-condition claims.",
+            "Introduction": "10-14 citation occurrences per 1,000 words, concentrated on factual context, problem evidence, gap and contribution claims.",
+            "Literature Review or Theoretical Background": "16-22 citation occurrences per 1,000 words, organised around claims, tensions and gaps rather than author-by-author summaries.",
+            "Review, Conceptual or Bibliometric Synthesis": "18-26 citation occurrences per 1,000 words where the argument, evidence map or conceptual integration depends directly on prior scholarship.",
+            "Methods": "6-10 citation occurrences per 1,000 words for design, measurement, sampling, analytical and reporting choices that require authority.",
+            "Discussion": "10-15 citation occurrences per 1,000 words, positioned directly beside comparisons, mechanisms, contradictions and boundary-condition claims.",
         },
         "rules": [
             "Place a verified citation in the same sentence as the claim it supports, or immediately after the supported clause. Do not leave several factual or theoretical claims under one distant citation.",
             "Cite every substantive factual, theoretical, methodological and empirical claim that is not common knowledge or supplied as the study's own confirmed result.",
             "Use multiple directly relevant sources when a claim represents a contested debate, broad evidence base or methodological standard.",
+            "Distribute citations across the paragraph. Avoid placing one large citation cluster only at the end after several independently supportable claims.",
+            "Before returning the manuscript, audit citation coverage section by section and strengthen under-cited claims using only verified records in the supplied source bank.",
             "Do not cite a source merely because a keyword matches. The title, abstract, method, context or reported finding must directly support the claim.",
             "Do not fabricate references or pad the manuscript to hit a numerical target. When the verified evidence bank is insufficient, insert [Author action: Add a verified source that directly supports this claim.]",
             "Keep citation density lower in pure results reporting, but cite method authorities in Methods and theory or prior evidence in Discussion.",
@@ -1029,8 +1036,9 @@ def _humanizer_model() -> str:
     )
 
 
-def _humanizer_mode() -> str:
-    configured = str(os.getenv("ARTICLEREADY_HUMANIZER_MODE", "balanced") or "balanced").strip().lower()
+def _humanizer_mode(payload: dict[str, Any] | None = None) -> str:
+    requested = str((payload or {}).get("humanizer_mode") or "").strip().lower()
+    configured = requested or str(os.getenv("ARTICLEREADY_HUMANIZER_MODE", "balanced") or "balanced").strip().lower()
     return configured if configured in {"off", "light", "balanced", "deep"} else "balanced"
 
 
@@ -1052,7 +1060,7 @@ def _humanize_article_with_model(
     touches only weak sections in balanced mode and all eligible sections in
     deep mode. Failure never invalidates the completed article.
     """
-    mode = _humanizer_mode()
+    mode = _humanizer_mode(payload)
     local_text, local_report = humanize_scholarly_text(text, mode=mode)
     models_used: list[str] = []
     if mode in {"off", "light"} or not client or not local_text.strip():
@@ -2482,6 +2490,7 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
                 "Never use future tense anywhere in the article or instrument package. Use present tense for a proposed Stage 1 design and past tense for completed work.",
                 "Every author decision, missing detail, permission check, ethics requirement, additional analysis, next-stage instruction or unresolved issue must appear as one square-bracketed instruction beginning '[Author action:'. No advice may remain in ordinary prose.",
                 "Cite substantive claims densely and locally. Place verified citations in the same sentence as the factual, theoretical, methodological or empirical claim they support, while avoiding citation padding and irrelevant sources.",
+                "Use the citation-density targets in the quality pack as a section-level minimum. Before returning the manuscript, audit each substantive section and strengthen under-cited claims using only verified source records.",
                 "Write in polished formal British English, minimise long dashes, use prose-led objectives and maintain a focused article contribution.",
                 "Apply the strong_humanisation_requirements in the quality pack: use controlled high burstiness, varied paragraph shape, precise lexical variation and natural transitions while preserving all evidence, citations, tables, equations and placeholders.",
                 "Do not randomise paragraph order, inject tangents, introduce deliberate mistakes, or mention AI detection or humanisation in the article.",
@@ -2500,7 +2509,7 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
             "Write with expert conceptual judgement, rigorous method fit and publication-level analytical precision without claiming a professorial identity in the manuscript. "
             "Use no future tense. Stage 1 methods use present tense, and completed work uses past tense. "
             "Place every unresolved author action, permission check, missing evidence item, additional-analysis need or next-stage instruction inside one [Author action: ...] bracket. "
-            "Attach verified citations closely to substantive claims and never pad the text with weak or irrelevant sources. "
+            "Attach verified citations closely to substantive claims and meet the section-level citation-density minimums in the supplied quality pack without padding the text with weak or irrelevant sources. "
             "Apply the supplied strong human-supervised academic writing layer: use natural sentence-length variation, varied paragraph openings, "
             "precise disciplinary language and evidence-led reasoning while preserving citations, technical terms, tables, equations and placeholders. "
             "Do not add deliberate errors, unrelated tangents, or commentary about AI detection or humanisation. "
@@ -2550,7 +2559,7 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
     if payload["draft_stage"] == "initial_to_methods":
         article_text = _enforce_initial_scope(article_text)
 
-    humanizer_report: dict[str, Any] = {"mode": _humanizer_mode(), "applied": False}
+    humanizer_report: dict[str, Any] = {"mode": _humanizer_mode(payload), "applied": False}
     humanizer_models: list[str] = []
     if mode in {"ai_draft", "ai_batch_draft"}:
         article_text, humanizer_report, humanizer_models = _humanize_article_with_model(
@@ -2564,6 +2573,10 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
     article_text = _enforce_article_writer_output_rules(article_text)
     instrument_text = _enforce_article_writer_output_rules(instrument_text) if instrument_text else ""
     citation_density = _citation_density_report(article_text)
+    density_target = _citation_density_requirements(payload)["citation_occurrences_per_1000_words"]
+    citation_density["minimum_target"] = int(density_target["minimum"])
+    citation_density["preferred_target"] = int(density_target["target"])
+    citation_density["meets_minimum"] = float(citation_density.get("citation_occurrences_per_1000_words") or 0) >= int(density_target["minimum"])
 
     return {
         "article_text": article_text,

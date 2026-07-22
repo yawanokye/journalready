@@ -157,7 +157,7 @@ def variation_targets_met(report: dict[str, Any], profile: dict[str, Any] | None
 
 
 def scholarly_humanizer_prompt_rules() -> list[str]:
-    """Prompt rules shared by chapter generation and chapter strengthening."""
+    """Prompt rules shared by article drafting and article revision."""
     return [
         "Write in a natural, disciplined scholarly voice rather than a promotional, formulaic or template-like voice.",
         "Preserve the author's substantive voice. Improve clarity and flow without making every paragraph sound as though it was written by the same generic editor.",
