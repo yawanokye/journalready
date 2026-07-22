@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Article Writer | ArticleReady AI</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20260710-pricing">
-  <link rel="stylesheet" href="/static/articleready_payments.css?v=20260713-gpt56-payments">
+  <link rel="stylesheet" href="/static/styles.css?v=20260722-review-workspace">
+  <link rel="stylesheet" href="/static/articleready_payments.css?v=20260722-review-workspace">
 </head>
 <body>
   <header class="topbar">
     <a class="brand" href="/"><span class="brand-mark">AR</span><span>ArticleReady AI</span></a>
-    <nav class="nav"><a href="/">Home</a><a href="/topic-ideas">Article Topic Ideas</a><a href="/article-writer" aria-current="page">Article Writer</a><a href="/article-revision">Article Revision</a><a href="/pricing">Pricing</a></nav>
+    <nav class="nav"><a href="/">Home</a><a href="/topic-ideas">Article Topic Ideas</a><a href="/article-writer" aria-current="page">Article Writer</a><a href="/review-evidence">Review Evidence</a><a href="/article-revision">Article Revision</a><a href="/pricing">Pricing</a></nav>
   </header>
   <main class="shell">
     <section class="hero">
@@ -61,6 +61,47 @@
           <p id="sourceStatus" class="status"></p><div id="attachedSourceSummary" class="attached-summary">No literature records are attached yet.</div><div id="sourceSearchResults" class="source-grid compact-source-grid"></div>
         </div>
 
+        <details id="reviewProtocolInputPanel" class="review-protocol-panel" open hidden>
+          <summary><strong>Review protocol and evidence-base documentation</strong></summary>
+          <p class="help">Use this section for systematic, scoping, conceptual, integrative and bibliometric papers. The app develops a structured method and evidence audit from confirmed entries. It does not invent databases, searches, screening counts or corpus results.</p><div class="actions compact-actions"><a class="btn secondary" href="/review-evidence">Open Review Evidence Workspace</a><span id="reviewWorkspaceImportStatus" class="attached-summary" hidden></span></div>
+          <div class="two-cols">
+            <label><span class="field-label">Protocol positioning</span><select id="reviewProtocolPositioning"><option>Auto</option><option>Structured conceptual evidence base</option><option>Integrative review protocol</option><option>Systematic review protocol</option><option>Scoping review protocol</option><option>Bibliometric search and analysis protocol</option></select></label>
+            <label class="check protocol-check"><input type="checkbox" id="includeReviewProtocolPackage" checked> Generate a separate review protocol and evidence-audit package</label>
+          </div>
+          <label><span class="field-label">Formal databases and platforms searched</span><textarea id="reviewDatabases" rows="3" placeholder="e.g. Scopus; Web of Science Core Collection; ABI/INFORM. Enter only databases actually searched."></textarea></label>
+          <label><span class="field-label">Complete search strings</span><textarea id="reviewSearchStrings" rows="7" placeholder="Paste the exact query for each database, including field codes, Boolean operators, truncation and proximity commands."></textarea></label>
+          <div class="two-cols">
+            <label><span class="field-label">Formal search date</span><input id="reviewSearchDate" type="date"></label>
+            <label><span class="field-label">Publication-date limits</span><input id="reviewDateLimits" placeholder="e.g. January 2016 to July 2026, with justification"></label>
+          </div>
+          <div class="two-cols">
+            <label><span class="field-label">Language limits</span><input id="reviewLanguageLimits" placeholder="e.g. English only, with justification, or no language restriction"></label>
+            <label><span class="field-label">Eligible document types</span><input id="reviewDocumentTypes" placeholder="e.g. peer-reviewed articles and reviews"></label>
+          </div>
+          <label><span class="field-label">Inclusion and exclusion criteria</span><textarea id="reviewEligibilityCriteria" rows="5" placeholder="Define topic, context, population or unit, evidence type, publication status and exclusion grounds."></textarea></label>
+          <label><span class="field-label">Screening and disagreement resolution</span><textarea id="reviewScreeningProcess" rows="4" placeholder="Describe title/abstract screening, full-text assessment, reviewer roles, reasons for exclusion and disagreement resolution."></textarea></label>
+          <label><span class="field-label">Quality appraisal or critical evaluation</span><textarea id="reviewQualityAppraisal" rows="4" placeholder="State the appraisal tool and decision rule, or justify why formal appraisal is not appropriate for the selected review design."></textarea></label>
+          <div class="two-cols">
+            <label><span class="field-label">Backward and forward citation tracking</span><textarea id="reviewCitationTracking" rows="4" placeholder="Platform, procedure, stopping rule and handling of newly identified records"></textarea></label>
+            <label><span class="field-label">Duplicate-removal procedure</span><textarea id="reviewDuplicateRemoval" rows="4" placeholder="Software, matching fields, text normalisation, fuzzy matching and manual checks"></textarea></label>
+          </div>
+          <label><span class="field-label">Extraction, synthesis or bibliometric analysis method</span><textarea id="reviewSynthesisMethod" rows="5" placeholder="Describe extraction fields, coding, comparison, thematic or conceptual synthesis, performance analysis, science mapping, thresholds and interpretation rules as applicable."></textarea></label>
+          <label><span class="field-label">Software and reproducibility tools</span><input id="reviewSoftware" placeholder="e.g. EndNote 21, Rayyan, NVivo, R bibliometrix, VOSviewer, Python, with versions and settings"></label>
+          <h4>Verified record-flow counts</h4>
+          <p class="help">Leave a field blank when the count is not yet verified. The app checks the arithmetic and keeps unresolved values as red author actions.</p>
+          <div class="protocol-count-grid">
+            <label><span class="field-label">Records identified</span><input id="reviewRecordsIdentified" type="number" min="0"></label>
+            <label><span class="field-label">Duplicates removed</span><input id="reviewDuplicatesRemoved" type="number" min="0"></label>
+            <label><span class="field-label">Records screened</span><input id="reviewRecordsScreened" type="number" min="0"></label>
+            <label><span class="field-label">Title/abstract exclusions</span><input id="reviewRecordsExcluded" type="number" min="0"></label>
+            <label><span class="field-label">Full texts assessed</span><input id="reviewFullTextAssessed" type="number" min="0"></label>
+            <label><span class="field-label">Full-text exclusions</span><input id="reviewFullTextExcluded" type="number" min="0"></label>
+            <label><span class="field-label">Citation-tracking additions</span><input id="reviewCitationTrackingAdditions" type="number" min="0"></label>
+            <label><span class="field-label">Final corpus</span><input id="reviewFinalCorpusSize" type="number" min="0"></label>
+          </div>
+          <label><span class="field-label">Additional protocol or corpus notes</span><textarea id="reviewProtocolNotes" rows="4" placeholder="Record protocol registration, search updates, corpus boundaries, special journal requirements or retained audit files."></textarea></label>
+        </details>
+
         <div class="research-resource-panel">
           <div class="source-panel-head"><div><h3>Data source and instrument guidance</h3><p class="help">Secondary studies receive possible official datasets. Primary and qualitative studies receive candidate questionnaire, scale, interview-guide or instrument sources.</p></div><span id="resourceRouteBadge" class="source-count-badge">Auto</span></div>
           <div class="two-cols"><label><span class="field-label">Research route</span><select id="researchRoute"><option>Auto</option><option>Secondary data or existing dataset</option><option>Primary survey or questionnaire</option><option>Qualitative interviews or focus groups</option><option>Mixed methods</option><option>Experimental research</option><option>Review, conceptual or bibliometric research</option></select></label><label><span class="field-label">Maximum resources</span><select id="resourceMaxResults"><option value="4">4</option><option value="6" selected>6</option><option value="8">8</option><option value="10">10</option></select></label></div>
@@ -73,7 +114,7 @@
         </div>
 
         <div class="two-cols">
-          <label><span class="field-label">Article type</span><select id="articleType"><option>Empirical research article</option><option>Systematic review</option><option>Scoping review</option><option>Conceptual article</option><option>Bibliometric article</option><option>Methodological article</option><option>Case study article</option><option>Policy or practice article</option><option>Short communication</option></select></label>
+          <label><span class="field-label">Article type</span><select id="articleType"><option>Empirical research article</option><option>Systematic review</option><option>Scoping review</option><option>Conceptual article</option><option>Bibliometric article</option><option>Integrative review</option><option>Methodological article</option><option>Case study article</option><option>Policy or practice article</option><option>Short communication</option></select></label>
           <label><span class="field-label">Research depth</span><select id="academicLevel"><option>Bachelors</option><option>Non-Research Masters</option><option selected>Research Masters (e.g. MPhil)</option><option>Professional Doctorate (DBA, DEd)</option><option>PhD</option></select></label>
         </div>
         <div class="two-cols"><label><span class="field-label">Target word limit</span><input id="wordLimit" value="7000-9000" placeholder="e.g. 7000-9000"></label><label><span class="field-label">Citation style</span><select id="citationStyle"><option>APA 7th</option><option>Harvard</option><option>Chicago Author-Date</option><option>Vancouver</option><option>IEEE</option><option>AMA</option><option>Journal-specific style</option></select></label></div>
@@ -117,12 +158,16 @@ Conclusion 600"></textarea></label>
           <div class="result-head"><div><h2>3. Instrument or data-collection package</h2><p class="help">This draft is provisional. Check permission, content validity, cultural fit, pilot evidence and scoring before use.</p></div><div class="output-actions"><button id="copyInstrumentBtn" type="button">Copy</button><button id="downloadInstrumentBtn" type="button">Download DOCX</button></div></div>
           <textarea id="instrumentOutput" class="output-box instrument-box" rows="24"></textarea>
         </section>
+        <section id="reviewProtocolOutputPanel" class="instrument-output" hidden>
+          <div class="result-head"><div><h2>4. Review protocol and evidence audit</h2><p class="help">This package distinguishes formal review procedures from ArticleReady metadata discovery and flags every missing or inconsistent protocol item.</p></div><div class="output-actions"><button id="copyReviewProtocolBtn" type="button">Copy</button><button id="downloadReviewProtocolBtn" type="button">Download DOCX</button></div></div>
+          <textarea id="reviewProtocolOutput" class="output-box protocol-output-box" rows="26"></textarea>
+        </section>
       </section>
     </section>
 
-    <section class="card" style="margin-top:22px"><h2>4. Source records supplied to the draft</h2><p class="help">Relevant records should appear in normal citations and in the Source Use Audit. Detected retracted or withdrawn records are excluded where metadata exposes their status.</p><div id="filters" class="idea-meta"></div><div id="draftSourceSummary" class="attached-summary"></div><div id="sources" class="source-grid"></div></section>
+    <section class="card" style="margin-top:22px"><h2>5. Source records supplied to the draft</h2><p class="help">Relevant records should appear in normal citations and in the Source Use Audit. Detected retracted or withdrawn records are excluded where metadata exposes their status.</p><div id="filters" class="idea-meta"></div><div id="draftSourceSummary" class="attached-summary"></div><div id="sources" class="source-grid"></div></section>
   </main>
-  <script src="/static/articleready_payments.js?v=20260722-humanizer-citations-docx"></script>
-  <script src="/static/article_writer.js?v=20260722-humanizer-citations-docx"></script>
+  <script src="/static/articleready_payments.js?v=20260722-review-workspace"></script>
+  <script src="/static/article_writer.js?v=20260722-review-workspace"></script>
 </body>
 </html>

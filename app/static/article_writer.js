@@ -37,9 +37,11 @@ const val = (id) => ($(id)?.value || "").trim();
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[ch]));
 const SOURCE_STORAGE_KEY = "articleready_attached_source_bank_v1";
 const SEARCH_STORAGE_KEY = "articleready_latest_source_search_v1";
+const REVIEW_WORKSPACE_PAYLOAD_KEY = "articleready_review_workspace_payload_v1";
 
 let lastText = "";
 let lastInstrumentText = "";
+let lastReviewProtocolText = "";
 let attachedSourceBank = [];
 let latestSourceSearchResult = null;
 let latestResearchResources = null;
@@ -100,6 +102,73 @@ function isFullSynthesisArticle() {
   return ["systematic", "scoping", "conceptual", "theory", "bibliometric", "scientometric"].some(term => type.includes(term));
 }
 
+function isReviewEvidenceArticle() {
+  const type = val("articleType").toLowerCase();
+  return ["systematic", "scoping", "review", "conceptual", "theory", "integrative", "bibliometric", "scientometric"].some(term => type.includes(term));
+}
+
+function numberOrNull(id) {
+  const raw = val(id);
+  if (raw === "") return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : null;
+}
+
+
+function importReviewWorkspacePayload() {
+  let data = null;
+  try {
+    data = JSON.parse(localStorage.getItem(REVIEW_WORKSPACE_PAYLOAD_KEY) || "null");
+  } catch (_) { data = null; }
+  if (!data || typeof data !== "object") return false;
+
+  const mapping = {
+    review_protocol_positioning: "reviewProtocolPositioning",
+    review_databases: "reviewDatabases",
+    review_search_strings: "reviewSearchStrings",
+    review_search_date: "reviewSearchDate",
+    review_date_limits: "reviewDateLimits",
+    review_language_limits: "reviewLanguageLimits",
+    review_document_types: "reviewDocumentTypes",
+    review_eligibility_criteria: "reviewEligibilityCriteria",
+    review_screening_process: "reviewScreeningProcess",
+    review_quality_appraisal: "reviewQualityAppraisal",
+    review_citation_tracking: "reviewCitationTracking",
+    review_duplicate_removal: "reviewDuplicateRemoval",
+    review_synthesis_method: "reviewSynthesisMethod",
+    review_software: "reviewSoftware",
+    review_protocol_notes: "reviewProtocolNotes",
+    review_records_identified: "reviewRecordsIdentified",
+    review_duplicates_removed: "reviewDuplicatesRemoved",
+    review_records_screened: "reviewRecordsScreened",
+    review_records_excluded: "reviewRecordsExcluded",
+    review_full_text_assessed: "reviewFullTextAssessed",
+    review_full_text_excluded: "reviewFullTextExcluded",
+    review_citation_tracking_additions: "reviewCitationTrackingAdditions",
+    review_final_corpus_size: "reviewFinalCorpusSize",
+  };
+  if (data.article_type && $("articleType")) $("articleType").value = data.article_type;
+  if ($("sourceMode")) $("sourceMode").value = "Develop as a new independent article";
+  if (data.workspace_title && $("articleTitle") && !val("articleTitle")) $("articleTitle").value = data.workspace_title;
+  if (data.research_problem && $("researchProblem") && !val("researchProblem")) $("researchProblem").value = data.research_problem;
+  if (data.methodology && $("methodology") && !val("methodology")) $("methodology").value = data.methodology;
+  for (const [key, id] of Object.entries(mapping)) {
+    const element = $(id);
+    if (!element || data[key] == null) continue;
+    element.value = String(data[key]);
+  }
+  if ($("includeReviewProtocolPackage")) $("includeReviewProtocolPackage").checked = true;
+  applyWorkflowState(true, true);
+  const status = $("reviewWorkspaceImportStatus");
+  if (status) {
+    const summary = data.workspace_summary || {};
+    status.hidden = false;
+    status.textContent = `Imported from Review Evidence Workspace: ${summary.records_identified || 0} identified, ${summary.duplicates_removed || 0} duplicates removed, ${summary.records_screened || 0} screened and ${summary.final_corpus || 0} included.`;
+  }
+  localStorage.removeItem(REVIEW_WORKSPACE_PAYLOAD_KEY);
+  return true;
+}
+
 function currentTargetWords() {
   const explicit = Number(val("targetWordCount") || 0);
   if (explicit) return Math.max(1200, Math.min(explicit, 30000));
@@ -133,6 +202,7 @@ function setGroupDisabled(groupId, disabled) {
 function applyWorkflowState(sourceChanged = false, articleTypeChanged = false) {
   const independent = isIndependent();
   const synthesisFull = isFullSynthesisArticle();
+  const reviewEvidence = isReviewEvidenceArticle();
   const draftStage = $("draftStage");
   const fullOption = draftStage.querySelector('option[value="full_article"]');
   const initialOption = draftStage.querySelector('option[value="initial_to_methods"]');
@@ -161,6 +231,8 @@ function applyWorkflowState(sourceChanged = false, articleTypeChanged = false) {
   }
 
   setGroupDisabled("sourceStudyFields", independent);
+  $("reviewProtocolInputPanel").hidden = !reviewEvidence;
+  setGroupDisabled("reviewProtocolInputPanel", !reviewEvidence);
   $("independentNotice").hidden = !independent;
   if (independent) {
     $("independentNotice").innerHTML = synthesisFull
@@ -246,6 +318,18 @@ function payload() {
     include_source_search: Boolean($("includeSourceSearch")?.checked), include_older_foundational: Boolean($("includeOlderFoundational")?.checked),
     include_research_resource_search: Boolean($("includeResourceSearch")?.checked), source_search_terms: latestSourceSearchResult?.query || val("sourceSearchQuery"),
     source_bank: attachedSourceBank, research_resources: latestResearchResources || {},
+    include_review_protocol_package: Boolean($("includeReviewProtocolPackage")?.checked),
+    review_protocol_positioning: val("reviewProtocolPositioning") || "Auto", review_databases: val("reviewDatabases"),
+    review_search_strings: val("reviewSearchStrings"), review_search_date: val("reviewSearchDate"), review_date_limits: val("reviewDateLimits"),
+    review_language_limits: val("reviewLanguageLimits"), review_document_types: val("reviewDocumentTypes"),
+    review_eligibility_criteria: val("reviewEligibilityCriteria"), review_screening_process: val("reviewScreeningProcess"),
+    review_quality_appraisal: val("reviewQualityAppraisal"), review_citation_tracking: val("reviewCitationTracking"),
+    review_duplicate_removal: val("reviewDuplicateRemoval"), review_synthesis_method: val("reviewSynthesisMethod"),
+    review_software: val("reviewSoftware"), review_protocol_notes: val("reviewProtocolNotes"),
+    review_records_identified: numberOrNull("reviewRecordsIdentified"), review_duplicates_removed: numberOrNull("reviewDuplicatesRemoved"),
+    review_records_screened: numberOrNull("reviewRecordsScreened"), review_records_excluded: numberOrNull("reviewRecordsExcluded"),
+    review_full_text_assessed: numberOrNull("reviewFullTextAssessed"), review_full_text_excluded: numberOrNull("reviewFullTextExcluded"),
+    review_citation_tracking_additions: numberOrNull("reviewCitationTrackingAdditions"), review_final_corpus_size: numberOrNull("reviewFinalCorpusSize"),
     retrieved_sources: latestSourceSearchResult ? {...latestSourceSearchResult, sources: latestSourceSearchResult.sources || [], source_bank_count: attachedSourceBank.length, frontend_attached: true} : {}
   };
 }
@@ -380,6 +464,7 @@ async function draft(event) {
   const attachedMessage = attachedSourceBank.length ? ` with ${attachedSourceBank.length} attached source record(s)` : "";
   $("status").textContent = `Preparing the selected article stage${attachedMessage}...`;
   $("draftBtn").disabled = true; $("copyBtn").disabled = true; $("downloadBtn").disabled = true;
+  $("copyReviewProtocolBtn").disabled = true; $("downloadReviewProtocolBtn").disabled = true;
   try {
     const planKey = window.ArticleReadyPayments ? ArticleReadyPayments.selectedDraftPlan() : '';
     const headers = {"Content-Type":"application/json", ...(window.ArticleReadyPayments ? ArticleReadyPayments.paymentHeaders(planKey) : {})};
@@ -391,9 +476,14 @@ async function draft(event) {
     if (!response.ok) throw new Error(apiErrorMessage(body.detail ?? body, response.statusText || `Request failed (${response.status})`));
     lastText = body.article_text || "";
     lastInstrumentText = body.instrument_text || "";
+    lastReviewProtocolText = body.review_protocol_text || "";
     $("articleOutput").value = lastText;
     $("instrumentOutput").value = lastInstrumentText;
     $("instrumentOutputPanel").hidden = !lastInstrumentText;
+    $("reviewProtocolOutput").value = lastReviewProtocolText;
+    $("reviewProtocolOutputPanel").hidden = !lastReviewProtocolText;
+    $("copyReviewProtocolBtn").disabled = !lastReviewProtocolText;
+    $("downloadReviewProtocolBtn").disabled = !lastReviewProtocolText;
     if (body.research_resources) renderResearchResources(body.research_resources);
     renderDraftSources(body);
     const warnings = (body.provider_errors || []).length;
@@ -402,7 +492,11 @@ async function draft(event) {
       : body.draft_stage === "continuation_after_results"
         ? "Stage 2 completed. The full article draft is ready."
         : "Article draft completed.";
-    $("status").textContent = `${completionMessage} ${warnings ? `Review ${warnings} warning(s).` : "Review all red author-action items, citations and evidence."}`;
+    const protocolAudit = body.review_protocol_audit || {};
+    const protocolNote = protocolAudit.enabled
+      ? ` Review protocol audit: ${protocolAudit.complete ? "complete" : `${(protocolAudit.missing_items || []).length} missing item(s) and ${(protocolAudit.flow_warnings || []).length} count warning(s)`}.`
+      : "";
+    $("status").textContent = `${completionMessage} ${warnings ? `Review ${warnings} warning(s).` : "Review all red author-action items, citations and evidence."}${protocolNote}`;
     $("copyBtn").disabled = !lastText; $("downloadBtn").disabled = !lastText;
   } catch (error) { $("status").textContent = `Error: ${apiErrorMessage(error, "Article drafting failed.")}`; }
   finally { $("draftBtn").disabled = false; }
@@ -429,12 +523,12 @@ async function downloadContent(text, title, filename) {
 
 function clearAll() {
   $("articleForm").reset(); $("wordLimit").value = "7000-9000"; $("targetWordCount").value = "8000"; $("longWriteMode").value = "auto"; $("humanizerMode").value = "balanced"; $("articleStructure").value = ""; $("draftStage").value = "full_article"; $("academicLevel").value = "Research Masters (e.g. MPhil)"; $("researchRoute").value = "Auto";
-  $("articleOutput").value = ""; $("instrumentOutput").value = ""; $("instrumentOutputPanel").hidden = true; $("instrumentRequirementsLabel").hidden = true; $("filters").innerHTML = ""; $("sources").innerHTML = ""; $("draftSourceSummary").innerHTML = ""; $("status").textContent = "";
-  $("copyBtn").disabled = true; $("downloadBtn").disabled = true; lastText = ""; lastInstrumentText = ""; latestResearchResources = null; renderResearchResources(null); clearAttachedSources(); applyWorkflowState(false, false);
+  $("articleOutput").value = ""; $("instrumentOutput").value = ""; $("instrumentOutputPanel").hidden = true; $("reviewProtocolOutput").value = ""; $("reviewProtocolOutputPanel").hidden = true; $("instrumentRequirementsLabel").hidden = true; $("filters").innerHTML = ""; $("sources").innerHTML = ""; $("draftSourceSummary").innerHTML = ""; $("status").textContent = "";
+  $("copyBtn").disabled = true; $("downloadBtn").disabled = true; $("copyReviewProtocolBtn").disabled = true; $("downloadReviewProtocolBtn").disabled = true; lastText = ""; lastInstrumentText = ""; lastReviewProtocolText = ""; latestResearchResources = null; renderResearchResources(null); clearAttachedSources(); applyWorkflowState(false, false);
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  restoreSources(); renderAttachedSummary(); renderLatestSearch(latestSourceSearchResult); renderResearchResources(null); applyWorkflowState(false, false);
+  restoreSources(); renderAttachedSummary(); renderLatestSearch(latestSourceSearchResult); renderResearchResources(null); applyWorkflowState(false, false); importReviewWorkspacePayload();
   $("sourceMode").addEventListener("change", () => applyWorkflowState(true, false));
   $("articleType").addEventListener("change", () => { applyWorkflowState(false, true); markResourcesStale(); });
   $("draftStage").addEventListener("change", () => applyWorkflowState(false, false));
@@ -453,5 +547,7 @@ window.addEventListener("DOMContentLoaded", () => {
   $("downloadBtn").addEventListener("click", () => downloadContent($("articleOutput").value || lastText, val("articleTitle") || "Journal Article Draft", "journal_article_draft.docx"));
   $("copyInstrumentBtn").addEventListener("click", () => copyContent($("instrumentOutput").value || lastInstrumentText, "Instrument draft"));
   $("downloadInstrumentBtn").addEventListener("click", () => downloadContent($("instrumentOutput").value || lastInstrumentText, `${val("articleTitle") || "Article"} Instrument`, "article_instrument_draft.docx"));
+  $("copyReviewProtocolBtn").addEventListener("click", () => copyContent($("reviewProtocolOutput").value || lastReviewProtocolText, "Review protocol"));
+  $("downloadReviewProtocolBtn").addEventListener("click", () => downloadContent($("reviewProtocolOutput").value || lastReviewProtocolText, `${val("articleTitle") || "Article"} Review Protocol and Evidence Audit`, "review_protocol_evidence_audit.docx"));
   $("clearBtn").addEventListener("click", clearAll);
 });

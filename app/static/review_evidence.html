@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <title>Review Evidence Workspace | ArticleReady AI</title>
+  <link rel="stylesheet" href="/static/styles.css?v=20260722-review-workspace">
+  <link rel="stylesheet" href="/static/articleready_payments.css?v=20260713-gpt56-payments">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><span class="brand-mark">AR</span><span>ArticleReady AI</span></a>
+    <nav class="nav" aria-label="Main navigation">
+      <a href="/">Home</a>
+      <a href="/topic-ideas">Article Topic Ideas</a>
+      <a href="/article-writer">Article Writer</a>
+      <a href="/review-evidence" aria-current="page">Review Evidence</a>
+      <a href="/article-revision">Article Revision</a>
+      <a href="/pricing">Pricing</a>
+    </nav>
+  </header>
+
+  <main class="shell review-workspace-shell">
+    <section class="hero review-workspace-hero">
+      <div class="hero-copy">
+        <p class="eyebrow">Auditable review management</p>
+        <h1>Review Evidence Workspace</h1>
+        <p class="lead">Import formal database exports, document search runs, confirm duplicates, screen records, attach full texts and generate verified record-flow counts and a final corpus. The article writer uses this ledger instead of inventing review statistics.</p>
+      </div>
+      <aside class="hero-note">
+        <h2>Evidence before prose</h2>
+        <p>AI may help organise and draft the methodology, but only imported records and confirmed screening decisions become formal review evidence.</p>
+        <p class="muted">Each workspace has a private browser-held access token. Save the access-key file before clearing browser data or changing devices.</p>
+      </aside>
+    </section>
+
+    <section class="workspace-project-bar card">
+      <div class="workspace-project-selector">
+        <label><span class="field-label">Saved workspace on this browser</span><select id="projectSelector"><option value="">Create or select a workspace</option></select></label>
+        <button id="newProjectBtn" type="button" class="secondary">New workspace</button><button id="exportAccessBtn" type="button" class="ghost-button" disabled>Save access key</button><input id="restoreAccessFile" type="file" accept=".json" hidden><button id="restoreAccessBtn" type="button" class="ghost-button">Restore access key</button>
+      </div>
+      <p id="globalStatus" class="status" role="status" aria-live="polite"></p>
+    </section>
+
+    <section id="createProjectPanel" class="card workspace-create-panel">
+      <div class="result-head">
+        <div><h2>Create a review workspace</h2><p class="help">The title and review type can be changed later. The access token is stored only in this browser.</p></div>
+      </div>
+      <form id="createProjectForm" class="form-card">
+        <div class="two-cols">
+          <label><span class="field-label">Workspace title *</span><input id="newProjectTitle" required placeholder="e.g. Public procurement integrity systematic review"></label>
+          <label><span class="field-label">Review type</span><select id="newProjectType"><option>Systematic review</option><option>Scoping review</option><option>Conceptual article</option><option>Bibliometric article</option><option>Integrative review</option></select></label>
+        </div>
+        <label><span class="field-label">Review question or objective</span><textarea id="newProjectQuestion" rows="3" placeholder="State the focused review question or conceptual objective."></textarea></label>
+        <div class="actions"><button type="submit">Create workspace</button></div>
+      </form>
+    </section>
+
+    <section id="workspacePanel" hidden>
+      <section class="workspace-summary-grid" aria-label="Review summary">
+        <article class="workspace-stat"><span>Identified</span><strong id="sumIdentified">0</strong></article>
+        <article class="workspace-stat"><span>Duplicates removed</span><strong id="sumDuplicates">0</strong></article>
+        <article class="workspace-stat"><span>Screened</span><strong id="sumScreened">0</strong></article>
+        <article class="workspace-stat"><span>Full texts assessed</span><strong id="sumFullText">0</strong></article>
+        <article class="workspace-stat"><span>Final corpus</span><strong id="sumIncluded">0</strong></article>
+        <article class="workspace-stat warning-stat"><span>Unresolved items</span><strong id="sumUnresolved">0</strong></article>
+      </section>
+
+      <section class="workspace-layout">
+        <div class="workspace-main-column">
+          <details class="card workspace-section" open>
+            <summary><strong>1. Review design and protocol</strong></summary>
+            <form id="projectForm" class="form-card">
+              <div class="two-cols">
+                <label><span class="field-label">Workspace title</span><input id="projectTitle" required></label>
+                <label><span class="field-label">Review type</span><select id="projectArticleType"><option>Systematic review</option><option>Scoping review</option><option>Conceptual article</option><option>Bibliometric article</option><option>Integrative review</option></select></label>
+              </div>
+              <label><span class="field-label">Review question or objective</span><textarea id="projectQuestion" rows="3"></textarea></label>
+              <label><span class="field-label">Protocol positioning</span><select id="projectPositioning"><option>Auto</option><option>Systematic review protocol</option><option>Scoping review protocol</option><option>Structured conceptual evidence base</option><option>Integrative review protocol</option><option>Bibliometric search and analysis protocol</option></select></label>
+              <label><span class="field-label">Inclusion and exclusion criteria</span><textarea id="projectEligibility" rows="5" placeholder="Define topic, setting, population or unit, evidence type, publication status, dates, language and exclusion grounds."></textarea></label>
+              <label><span class="field-label">Screening and disagreement resolution</span><textarea id="projectScreening" rows="4" placeholder="Describe title/abstract screening, full-text review, reviewer roles and disagreement resolution."></textarea></label>
+              <label><span class="field-label">Quality appraisal or critical evaluation</span><textarea id="projectQuality" rows="4"></textarea></label>
+              <label><span class="field-label">Extraction, synthesis or bibliometric analysis method</span><textarea id="projectSynthesis" rows="5"></textarea></label>
+              <label><span class="field-label">Software and versions</span><input id="projectSoftware" placeholder="e.g. EndNote 21, Rayyan, R bibliometrix 4.x, VOSviewer, Python"></label>
+              <label><span class="field-label">Protocol, registration and audit notes</span><textarea id="projectNotes" rows="4"></textarea></label>
+              <div class="actions"><button type="submit">Save review design</button><button id="deleteProjectBtn" type="button" class="danger-button">Delete workspace</button></div>
+            </form>
+          </details>
+
+          <details class="card workspace-section" open>
+            <summary><strong>2. Register search and import records</strong></summary>
+            <p class="help">Upload the export produced by the named database or source. Supported formats are RIS, BibTeX, CSV, TSV, XLSX and JSON.</p>
+            <form id="importForm" class="form-card">
+              <div class="two-cols">
+                <label><span class="field-label">Database or source *</span><input id="importDatabase" required placeholder="e.g. Scopus"></label>
+                <label><span class="field-label">Platform</span><input id="importPlatform" placeholder="e.g. Elsevier"></label>
+              </div>
+              <div class="two-cols">
+                <label><span class="field-label">Source route</span><select id="importRoute"><option value="database">Database search</option><option value="backward_citation">Backward citation tracking</option><option value="forward_citation">Forward citation tracking</option><option value="manual_journal">Manual journal search</option><option value="expert_recommendation">Expert recommendation</option><option value="grey_literature">Grey-literature search</option><option value="other">Other route</option></select></label>
+                <label><span class="field-label">Search date</span><input id="importSearchDate" type="date"></label>
+              </div>
+              <label><span class="field-label">Complete search string</span><textarea id="importSearchString" rows="6" placeholder="Paste the exact database-specific search string, including field codes and Boolean operators."></textarea></label>
+              <div class="two-cols">
+                <label><span class="field-label">Publication-date limits</span><input id="importDateLimits" placeholder="e.g. 1 January 2016 to 22 July 2026"></label>
+                <label><span class="field-label">Language limits</span><input id="importLanguageLimits" placeholder="e.g. English only, with justification"></label>
+              </div>
+              <div class="two-cols">
+                <label><span class="field-label">Eligible document types</span><input id="importDocumentTypes" placeholder="e.g. Articles and reviews"></label>
+                <label><span class="field-label">Results reported by database</span><input id="importReportedCount" type="number" min="0"></label>
+              </div>
+              <label><span class="field-label">Database export file *</span><input id="importFile" type="file" accept=".ris,.bib,.bibtex,.csv,.tsv,.xlsx,.xlsm,.json,.txt" required></label>
+              <label><span class="field-label">Search-run notes</span><textarea id="importNotes" rows="3"></textarea></label>
+              <div class="actions"><button id="importBtn" type="submit">Register search and import records</button></div>
+              <p id="importStatus" class="status"></p>
+            </form>
+            <div id="searchRunList" class="search-run-list"></div>
+          </details>
+
+          <details class="card workspace-section" open>
+            <summary><strong>3. Deduplication and screening ledger</strong></summary>
+            <div class="workspace-filter-grid">
+              <label><span class="field-label">Stage</span><select id="recordStage"><option value="all">All records</option><option value="possible_duplicates">Possible duplicates</option><option value="duplicates">Confirmed duplicates</option><option value="title_abstract">Awaiting title/abstract decision</option><option value="full_text">Awaiting full-text assessment</option><option value="included">Final included corpus</option><option value="excluded">Excluded records</option></select></label>
+              <label><span class="field-label">Search records</span><input id="recordSearch" placeholder="Title, abstract, author or DOI"></label>
+              <div class="workspace-filter-action"><button id="loadRecordsBtn" type="button" class="secondary">Apply filters</button></div>
+            </div>
+
+            <div class="bulk-screening-panel">
+              <div class="two-cols">
+                <label><span class="field-label">Bulk screening stage</span><select id="bulkStage"><option value="title_abstract">Title and abstract</option><option value="full_text">Full text</option></select></label>
+                <label><span class="field-label">Decision</span><select id="bulkDecision"><option value="include">Include</option><option value="exclude">Exclude</option><option value="uncertain">Uncertain, title/abstract only</option><option value="not_retrieved">Not retrieved, full text only</option></select></label>
+              </div>
+              <label><span class="field-label">Reason, required for exclusions or non-retrieval</span><input id="bulkReason"></label>
+              <div class="actions compact-actions"><button id="bulkApplyBtn" type="button">Apply to selected records</button><button id="selectPageBtn" type="button" class="secondary">Select page</button><button id="clearSelectionBtn" type="button" class="ghost-button">Clear selection</button></div>
+            </div>
+
+            <div class="workspace-table-wrap">
+              <table class="workspace-record-table">
+                <thead><tr><th><input id="selectAllRecords" type="checkbox" aria-label="Select all records"></th><th>Record</th><th>Source</th><th>Duplicate status</th><th>Title/abstract</th><th>Full text</th><th>Action</th></tr></thead>
+                <tbody id="recordTableBody"><tr><td colspan="7" class="muted">Import records to begin screening.</td></tr></tbody>
+              </table>
+            </div>
+            <div class="workspace-pagination"><button id="previousPageBtn" type="button" class="secondary">Previous</button><span id="recordPageInfo">0 records</span><button id="nextPageBtn" type="button" class="secondary">Next</button></div>
+          </details>
+        </div>
+
+        <aside class="workspace-side-column">
+          <section class="card workspace-flow-card">
+            <h2>Record-flow summary</h2>
+            <p class="help">Counts are calculated from the evidence ledger.</p>
+            <div class="prisma-flow">
+              <div class="flow-box"><span>Database records</span><strong id="flowDatabase">0</strong></div>
+              <div class="flow-plus">+</div>
+              <div class="flow-box"><span>Other methods</span><strong id="flowOther">0</strong></div>
+              <div class="flow-arrow">↓</div>
+              <div class="flow-box"><span>Duplicates removed</span><strong id="flowDuplicates">0</strong></div>
+              <div class="flow-arrow">↓</div>
+              <div class="flow-box"><span>Records screened</span><strong id="flowScreened">0</strong></div>
+              <div class="flow-split"><div><span>Excluded</span><strong id="flowTAExcluded">0</strong></div><div><span>Full texts assessed</span><strong id="flowFullText">0</strong></div></div>
+              <div class="flow-arrow">↓</div>
+              <div class="flow-split"><div><span>Full-text exclusions</span><strong id="flowFTExcluded">0</strong></div><div><span>Not retrieved</span><strong id="flowNotRetrieved">0</strong></div></div>
+              <div class="flow-arrow">↓</div>
+              <div class="flow-box included-flow"><span>Final included corpus</span><strong id="flowIncluded">0</strong></div>
+            </div>
+            <div id="summaryWarnings" class="workspace-warning-list"></div>
+          </section>
+
+          <section class="card workspace-export-card">
+            <h2>Use and export evidence</h2>
+            <p class="help">The Article Writer receives only the documented protocol and calculated counts. The full audit remains separate.</p>
+            <div class="workspace-export-actions">
+              <button id="sendToWriterBtn" type="button">Use in Article Writer</button>
+              <button id="exportProtocolBtn" type="button" class="secondary">Protocol and audit DOCX</button>
+              <button id="exportIncludedBtn" type="button" class="secondary">Included corpus CSV</button>
+              <button id="exportAllBtn" type="button" class="secondary">Complete ledger CSV</button>
+              <button id="exportAuditBtn" type="button" class="ghost-button">Full audit JSON</button>
+            </div>
+          </section>
+
+          <section id="recordDetailCard" class="card workspace-record-detail" hidden>
+            <div class="result-head"><div><h2>Record review</h2><p id="detailSource" class="help"></p></div><button id="closeDetailBtn" type="button" class="ghost-button">Close</button></div>
+            <h3 id="detailTitle"></h3>
+            <p id="detailAuthors" class="muted"></p>
+            <details><summary>Abstract</summary><p id="detailAbstract" class="record-abstract"></p></details>
+            <div id="duplicateDecisionPanel" class="duplicate-decision-panel" hidden>
+              <p id="duplicateMessage"></p>
+              <div class="actions compact-actions"><button id="confirmDuplicateBtn" type="button">Confirm duplicate</button><button id="keepUniqueBtn" type="button" class="secondary">Keep as unique</button></div>
+            </div>
+            <form id="recordReviewForm" class="form-card">
+              <label><span class="field-label">Title and abstract decision</span><select id="detailTADecision"><option value="not_screened">Not screened</option><option value="include">Include</option><option value="exclude">Exclude</option><option value="uncertain">Uncertain</option></select></label>
+              <label><span class="field-label">Title and abstract reason</span><input id="detailTAReason" placeholder="Required when excluded"></label>
+              <label><span class="field-label">Attach full text</span><input id="detailFullTextFile" type="file" accept=".docx,.pdf,.txt,.md,.rtf,.json"></label>
+              <button id="uploadFullTextBtn" type="button" class="secondary">Extract and attach full text</button>
+              <p id="detailFullTextStatus" class="help"></p>
+              <details id="fullTextPreviewPanel" hidden><summary>Extracted full-text preview</summary><pre id="fullTextPreview" class="full-text-preview"></pre></details>
+              <label><span class="field-label">Full-text decision</span><select id="detailFTDecision"><option value="not_assessed">Not assessed</option><option value="include">Include in final corpus</option><option value="exclude">Exclude</option><option value="not_retrieved">Full text not retrieved</option></select></label>
+              <label><span class="field-label">Full-text reason</span><input id="detailFTReason" placeholder="Required when excluded or not retrieved"></label>
+              <label><span class="field-label">Reviewer notes</span><textarea id="detailNotes" rows="4"></textarea></label>
+              <div class="actions"><button type="submit">Save screening decision</button></div>
+              <p id="detailStatus" class="status"></p>
+            </form>
+          </section>
+        </aside>
+      </section>
+    </section>
+  </main>
+
+  <footer class="footer">ArticleReady AI Review Evidence Workspace.</footer>
+  <script src="/static/review_evidence.js?v=20260722-review-workspace"></script>
+</body>
+</html>
