@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
-from app.file_extractor import extract_uploaded_text
+from app.file_extractor import extract_uploaded_text, read_upload_limited
 from app.review_workspace_store import (
     attach_full_text,
     bulk_update_records,
@@ -100,9 +100,7 @@ async def import_review_records(
 ) -> dict[str, Any]:
     _authorise(project_id, x_review_workspace_token)
     try:
-        content = await file.read()
-        if len(content) > 50 * 1024 * 1024:
-            raise ValueError("The database export exceeds the 50 MB upload limit.")
+        content = await read_upload_limited(file, 50 * 1024 * 1024)
         run = create_search_run(
             project_id,
             {
@@ -201,9 +199,7 @@ async def upload_full_text(
 ) -> dict[str, Any]:
     _authorise(project_id, x_review_workspace_token)
     try:
-        content = await file.read()
-        if len(content) > 25 * 1024 * 1024:
-            raise ValueError("The full-text file exceeds the 25 MB upload limit.")
+        content = await read_upload_limited(file, 25 * 1024 * 1024)
         extracted = extract_uploaded_text(file.filename or "full_text.pdf", content)
         return attach_full_text(project_id, record_id, extracted.get("filename") or file.filename or "full_text", extracted.get("text") or "")
     except ValueError as exc:

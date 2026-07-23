@@ -4,10 +4,56 @@ import csv
 import io
 import os
 import re
+import zipfile
 from typing import Any
 
 MAX_UPLOAD_BYTES = int(os.getenv("ARTICLEREADY_MAX_UPLOAD_BYTES", str(15 * 1024 * 1024)))
 MAX_EXTRACTED_CHARS = int(os.getenv("ARTICLEREADY_MAX_EXTRACTED_CHARS", "190000"))
+
+
+MAX_ARCHIVE_FILES = int(os.getenv("ARTICLEREADY_MAX_ARCHIVE_FILES", "5000"))
+MAX_ARCHIVE_UNCOMPRESSED_BYTES = int(os.getenv("ARTICLEREADY_MAX_ARCHIVE_UNCOMPRESSED_BYTES", str(120 * 1024 * 1024)))
+MAX_ARCHIVE_COMPRESSION_RATIO = float(os.getenv("ARTICLEREADY_MAX_ARCHIVE_COMPRESSION_RATIO", "200"))
+MAX_PDF_PAGES = int(os.getenv("ARTICLEREADY_MAX_PDF_PAGES", "500"))
+
+
+async def read_upload_limited(file: Any, max_bytes: int) -> bytes:
+    """Read an UploadFile incrementally and reject oversized chunked uploads."""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(min(1024 * 1024, max_bytes + 1 - total))
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise ValueError(f"The uploaded file exceeds the {max_bytes // (1024 * 1024)} MB limit.")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _validate_zip_container(content: bytes, label: str) -> None:
+    """Reject path traversal and decompression-bomb style Office archives."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            members = archive.infolist()
+            if len(members) > MAX_ARCHIVE_FILES:
+                raise ValueError(f"The {label} contains too many internal files.")
+            total_uncompressed = 0
+            total_compressed = 0
+            for member in members:
+                name = str(member.filename or "").replace("\\", "/")
+                if name.startswith("/") or "../" in f"/{name}":
+                    raise ValueError(f"The {label} contains an unsafe internal path.")
+                total_uncompressed += max(0, int(member.file_size or 0))
+                total_compressed += max(0, int(member.compress_size or 0))
+                if total_uncompressed > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                    raise ValueError(f"The {label} expands beyond the safe extraction limit.")
+            ratio = total_uncompressed / max(1, total_compressed)
+            if ratio > MAX_ARCHIVE_COMPRESSION_RATIO and total_uncompressed > 10 * 1024 * 1024:
+                raise ValueError(f"The {label} has an unsafe compression ratio.")
+    except zipfile.BadZipFile as exc:
+        raise ValueError(f"The uploaded {label} is not a valid Office file.") from exc
 
 
 def _normalise(text: str) -> str:
@@ -29,6 +75,7 @@ def _decode_text(content: bytes) -> str:
 def _extract_docx(content: bytes) -> str:
     from docx import Document
 
+    _validate_zip_container(content, "DOCX file")
     doc = Document(io.BytesIO(content))
     parts: list[str] = []
     for paragraph in doc.paragraphs:
@@ -46,6 +93,8 @@ def _extract_pdf(content: bytes) -> str:
     from pypdf import PdfReader
 
     reader = PdfReader(io.BytesIO(content))
+    if len(reader.pages) > MAX_PDF_PAGES:
+        raise ValueError(f"The PDF exceeds the {MAX_PDF_PAGES}-page safety limit.")
     pages: list[str] = []
     for index, page in enumerate(reader.pages, start=1):
         try:
@@ -62,6 +111,7 @@ def _extract_pdf(content: bytes) -> str:
 def _extract_xlsx(content: bytes) -> str:
     from openpyxl import load_workbook
 
+    _validate_zip_container(content, "XLSX file")
     workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
     output: list[str] = []
     for sheet in workbook.worksheets:

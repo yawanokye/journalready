@@ -4,15 +4,46 @@ import json
 import os
 import re
 import time
+import random
+import threading
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 DEFAULT_TIMEOUT_SECONDS = 12
 MAX_QUERY_CHARS = 220
 MAX_ABSTRACT_CHARS = 650
 RETRACTION_PATTERN = re.compile(r"\b(retracted|retraction|withdrawn|withdrawal|expression\s+of\s+concern|removed\s+article)\b", re.IGNORECASE)
+
+_PROVIDER_COOLDOWNS: dict[str, float] = {}
+_PROVIDER_COOLDOWN_LOCK = threading.Lock()
+
+
+def _provider_name_from_url(url: str) -> str:
+    if "semanticscholar.org" in url:
+        return "semantic_scholar"
+    if "openalex.org" in url:
+        return "openalex"
+    if "crossref.org" in url:
+        return "crossref"
+    if "ies.ed.gov" in url:
+        return "eric"
+    return "metadata_provider"
+
+
+def _cooldown_active(provider: str) -> int:
+    with _PROVIDER_COOLDOWN_LOCK:
+        until = float(_PROVIDER_COOLDOWNS.get(provider) or 0)
+    remaining = int(max(0, until - time.time()))
+    return remaining
+
+
+def _set_cooldown(provider: str, seconds: int) -> None:
+    with _PROVIDER_COOLDOWN_LOCK:
+        _PROVIDER_COOLDOWNS[provider] = max(float(_PROVIDER_COOLDOWNS.get(provider) or 0), time.time() + max(1, seconds))
+
 
 
 def build_source_query(profile: dict[str, Any], user_query: str = "") -> str:
@@ -254,7 +285,9 @@ def _search_semantic_scholar(query: str, per_provider: int = 10) -> list[dict[st
         "fields": "title,authors,year,venue,url,abstract,citationCount,externalIds,isOpenAccess,publicationTypes",
     }
     url = "https://api.semanticscholar.org/graph/v1/paper/search?" + urlencode(params)
-    data = _get_json(url)
+    semantic_key = os.getenv("SEMANTIC_SCHOLAR_API_KEY", "").strip()
+    headers = {"x-api-key": semantic_key} if semantic_key else None
+    data = _get_json(url, extra_headers=headers)
     records: list[dict[str, Any]] = []
     for item in data.get("data") or []:
         title = _clean_text(item.get("title"))
@@ -369,15 +402,68 @@ def _is_retracted_record(record: dict[str, Any]) -> bool:
         return True
     return _looks_retracted(record)
 
-def _get_json(url: str) -> dict[str, Any]:
-    request = Request(url, headers={
-        "User-Agent": "ArticleReadyAI/1.0 (scholarly metadata search; mailto optional)",
+def _get_json(url: str, *, extra_headers: dict[str, str] | None = None) -> dict[str, Any]:
+    """Fetch JSON metadata with bounded retry, Retry-After support and provider cooldown.
+
+    Public scholarly APIs can return 429 or transient 5xx responses. A short,
+    bounded retry keeps a temporary provider problem from aborting the article
+    workflow, while the cooldown prevents repeated requests from worsening the
+    provider's rate-limit state.
+    """
+    provider = _provider_name_from_url(url)
+    remaining = _cooldown_active(provider)
+    if remaining:
+        raise RuntimeError(f"Provider temporarily paused after rate limiting. Retry in about {remaining} seconds.")
+
+    headers = {
+        "User-Agent": os.getenv(
+            "ARTICLEREADY_METADATA_USER_AGENT",
+            "ArticleReadyAI/2.1 (scholarly metadata search; contact configured by operator)",
+        ),
         "Accept": "application/json",
-    })
-    with urlopen(request, timeout=DEFAULT_TIMEOUT_SECONDS) as response:  # nosec B310 - public metadata APIs only
-        raw = response.read().decode("utf-8", errors="replace")
-    time.sleep(0.12)  # be gentle to public APIs
-    return json.loads(raw)
+    }
+    if extra_headers:
+        headers.update({str(k): str(v) for k, v in extra_headers.items() if str(v).strip()})
+
+    max_attempts = max(1, min(int(os.getenv("ARTICLEREADY_METADATA_MAX_ATTEMPTS", "3") or 3), 5))
+    base_delay = max(0.25, float(os.getenv("ARTICLEREADY_METADATA_RETRY_BASE_SECONDS", "1.0") or 1.0))
+    last_error: Exception | None = None
+
+    for attempt in range(max_attempts):
+        request = Request(url, headers=headers)
+        try:
+            with urlopen(request, timeout=DEFAULT_TIMEOUT_SECONDS) as response:  # nosec B310 - fixed public metadata endpoints only
+                raw = response.read().decode("utf-8", errors="replace")
+            time.sleep(0.12)
+            return json.loads(raw)
+        except HTTPError as exc:
+            last_error = exc
+            status = int(getattr(exc, "code", 0) or 0)
+            retry_after_raw = str((getattr(exc, "headers", None) or {}).get("Retry-After") or "").strip()
+            try:
+                retry_after = int(float(retry_after_raw)) if retry_after_raw else 0
+            except ValueError:
+                retry_after = 0
+            transient = status in {408, 409, 425, 429, 500, 502, 503, 504}
+            if not transient or attempt + 1 >= max_attempts:
+                if status == 429:
+                    cooldown = max(retry_after, int(os.getenv("ARTICLEREADY_METADATA_429_COOLDOWN_SECONDS", "60") or 60))
+                    _set_cooldown(provider, min(cooldown, 900))
+                    raise RuntimeError(
+                        f"HTTP 429 rate limit from {provider}. Configure the provider API key or retry later."
+                    ) from exc
+                raise RuntimeError(f"HTTP {status or 'error'} from {provider}.") from exc
+            delay = retry_after or min(12.0, base_delay * (2 ** attempt) + random.uniform(0, 0.5))
+            if status == 429:
+                _set_cooldown(provider, int(max(delay, 2)))
+            time.sleep(delay)
+        except (URLError, TimeoutError, json.JSONDecodeError) as exc:
+            last_error = exc
+            if attempt + 1 >= max_attempts:
+                raise RuntimeError(f"Temporary response failure from {provider}: {type(exc).__name__}") from exc
+            time.sleep(min(8.0, base_delay * (2 ** attempt) + random.uniform(0, 0.5)))
+
+    raise RuntimeError(f"Metadata request failed for {provider}: {type(last_error).__name__ if last_error else 'unknown error'}")
 
 
 def _dedupe_and_rank(records: list[dict[str, Any]], query: str, recent_start_year: int) -> list[dict[str, Any]]:

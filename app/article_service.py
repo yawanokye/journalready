@@ -6,6 +6,7 @@ import json
 import os
 import random
 import re
+import time
 from datetime import datetime
 from typing import Any
 
@@ -61,24 +62,34 @@ def _safe_get_openai_client():
         return None
     try:
         from openai import OpenAI
-        return OpenAI(api_key=api_key)
+
+        timeout_seconds = max(30.0, float(os.getenv("OPENAI_ARTICLEREADY_TIMEOUT_SECONDS", "180") or 180))
+        sdk_retries = max(0, min(int(os.getenv("OPENAI_ARTICLEREADY_SDK_RETRIES", "2") or 2), 5))
+        return OpenAI(api_key=api_key, timeout=timeout_seconds, max_retries=sdk_retries)
     except Exception:
         return None
 
 
 def _normalise_gpt56_model(value: str, fallback: str) -> str:
-    """Restrict ArticleReady OpenAI routing to GPT-5.6 Terra or Sol."""
-    model = str(value or "").strip().lower()
-    allowed = {"gpt-5.6-terra", "gpt-5.6-sol"}
-    return model if model in allowed else fallback
+    """Return a safe configured OpenAI model ID.
+
+    The historical function name is retained for compatibility with older
+    ArticleReady modules, but model IDs are no longer restricted to invented or
+    account-specific labels. Runtime environment values are accepted when they
+    contain only ordinary model-ID characters.
+    """
+    model = str(value or "").strip()
+    if model and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{1,127}", model):
+        return model
+    return str(fallback or "gpt-5.1").strip()
 
 
 def _select_article_model(level: str, article_type: str = "", payload: dict[str, Any] | None = None) -> str:
-    """Route all ArticleReady OpenAI work through GPT-5.6 Terra or Sol.
+    """Choose the configured standard or advanced ArticleReady model.
 
-    Terra handles cost-balanced drafting. Sol handles doctoral, review, long,
-    synthesis-heavy and other high-complexity work. Environment overrides are
-    retained, but their defaults are restricted to the GPT-5.6 family.
+    Legacy Terra/Sol environment names remain supported, but the application no
+    longer assumes those labels are valid API model IDs. Operators can use any
+    model available to their OpenAI project.
     """
     payload = payload or {}
     level_l = (level or "").strip().lower()
@@ -96,42 +107,74 @@ def _select_article_model(level: str, article_type: str = "", payload: dict[str,
     is_long = target_words > 9000 or long_mode == "batch"
     is_completion = stage == "continuation_after_results"
 
-    terra = _normalise_gpt56_model(
-        os.getenv("OPENAI_ARTICLE_TERRA_MODEL")
+    standard_model = _normalise_gpt56_model(
+        os.getenv("OPENAI_ARTICLE_STANDARD_MODEL")
+        or os.getenv("OPENAI_ARTICLE_TERRA_MODEL")
         or os.getenv("OPENAI_ARTICLE_MASTERS_MODEL")
         or os.getenv("OPENAI_ARTICLE_BACHELOR_MODEL")
         or "",
-        "gpt-5.6-terra",
+        "gpt-5-mini",
     )
-    sol = _normalise_gpt56_model(
-        os.getenv("OPENAI_ARTICLE_SOL_MODEL")
+    advanced_model = _normalise_gpt56_model(
+        os.getenv("OPENAI_ARTICLE_ADVANCED_MODEL")
+        or os.getenv("OPENAI_ARTICLE_SOL_MODEL")
         or os.getenv("OPENAI_ARTICLE_DOCTORAL_MODEL")
         or os.getenv("OPENAI_ARTICLE_RESEARCH_MODEL")
         or "",
-        "gpt-5.6-sol",
+        "gpt-5.1",
     )
 
     if is_doctoral or is_research_masters or is_review_article or is_long or is_completion:
-        return sol
-    return terra
+        return advanced_model
+    return standard_model
 
 
 def _openai_model_candidates(primary_model: str, *, fallback_model: str = "") -> list[str]:
-    """Return an ordered GPT-5.6-only model chain with duplicates removed."""
-    terra = _normalise_gpt56_model(os.getenv("OPENAI_ARTICLE_TERRA_MODEL", ""), "gpt-5.6-terra")
-    sol = _normalise_gpt56_model(os.getenv("OPENAI_ARTICLE_SOL_MODEL", ""), "gpt-5.6-sol")
-    configured_fallback = fallback_model or os.getenv("OPENAI_ARTICLE_FALLBACK_MODEL") or ""
+    """Return a de-duplicated model chain using configured and safe defaults."""
+    configured = [
+        primary_model,
+        fallback_model,
+        os.getenv("OPENAI_ARTICLE_FALLBACK_MODEL", ""),
+        os.getenv("OPENAI_ARTICLE_ADVANCED_MODEL", ""),
+        os.getenv("OPENAI_ARTICLE_SOL_MODEL", ""),
+        os.getenv("OPENAI_ARTICLE_STANDARD_MODEL", ""),
+        os.getenv("OPENAI_ARTICLE_TERRA_MODEL", ""),
+    ]
+    configured.extend(
+        item.strip()
+        for item in os.getenv("OPENAI_ARTICLE_FALLBACK_MODELS", "gpt-5.1,gpt-5,gpt-5-mini").split(",")
+        if item.strip()
+    )
     candidates: list[str] = []
-    for raw_model, default in [
-        (primary_model, terra),
-        (configured_fallback, terra),
-        (terra, "gpt-5.6-terra"),
-        (sol, "gpt-5.6-sol"),
-    ]:
-        model = _normalise_gpt56_model(str(raw_model or ""), default)
-        if model not in candidates:
+    for raw_model in configured:
+        if not str(raw_model or "").strip():
+            continue
+        model = _normalise_gpt56_model(str(raw_model), "")
+        if model and model not in candidates:
             candidates.append(model)
-    return candidates
+    return candidates or ["gpt-5.1", "gpt-5-mini"]
+
+
+def _provider_status_code(exc: Exception) -> int:
+    for attr in ("status_code", "status"):
+        value = getattr(exc, attr, None)
+        try:
+            if value is not None:
+                return int(value)
+        except (TypeError, ValueError):
+            pass
+    response = getattr(exc, "response", None)
+    try:
+        return int(getattr(response, "status_code", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _sanitise_provider_error(exc: Exception) -> str:
+    text = re.sub(r"\s+", " ", str(exc or "")).strip()
+    text = re.sub(r"sk-[A-Za-z0-9_-]+", "[redacted-key]", text)
+    text = re.sub(r"Bearer\s+[A-Za-z0-9._-]+", "Bearer [redacted]", text, flags=re.IGNORECASE)
+    return text[:220] or type(exc).__name__
 
 
 def _call_openai_response_with_fallback(
@@ -143,32 +186,82 @@ def _call_openai_response_with_fallback(
     max_output_tokens: int | None = None,
     fallback_model: str = "",
 ) -> tuple[str, str, list[str]]:
-    """Call the Responses API with a Terra/Sol fallback chain.
-
-    Returns response text, the model that succeeded, and non-fatal attempt notes.
-    """
+    """Call OpenAI with bounded retries and a model/endpoint fallback chain."""
     errors: list[str] = []
     last_exc: Exception | None = None
-    for model in _openai_model_candidates(primary_model, fallback_model=fallback_model):
-        kwargs: dict[str, Any] = {
-            "model": model,
-            "instructions": instructions,
-            "input": input_payload,
-        }
-        if max_output_tokens:
-            kwargs["max_output_tokens"] = int(max_output_tokens)
-        try:
-            response = client.responses.create(**kwargs)
-            text = _extract_text(response)
-            if text:
-                return text, model, errors
-            errors.append(f"{model} returned no usable text.")
-        except Exception as exc:  # pragma: no cover - provider behaviour varies
-            last_exc = exc
-            errors.append(f"{model}: {str(exc)[:180]}")
+    attempts_per_model = max(1, min(int(os.getenv("OPENAI_ARTICLEREADY_ATTEMPTS_PER_MODEL", "2") or 2), 4))
+    base_delay = max(0.5, float(os.getenv("OPENAI_ARTICLEREADY_RETRY_BASE_SECONDS", "1.5") or 1.5))
+    candidates = _openai_model_candidates(primary_model, fallback_model=fallback_model)
+
+    for model in candidates:
+        for attempt in range(attempts_per_model):
+            kwargs: dict[str, Any] = {
+                "model": model,
+                "instructions": instructions,
+                "input": input_payload,
+                # Article manuscripts may contain unpublished research. Avoid
+                # persistent application-state storage unless an operator
+                # explicitly opts in.
+                "store": False,
+            }
+            if max_output_tokens:
+                kwargs["max_output_tokens"] = int(max_output_tokens)
+            try:
+                response = client.responses.create(**kwargs)
+                text = _extract_text(response)
+                if text:
+                    return text, model, errors
+                errors.append(f"{model} returned no usable text.")
+                break
+            except Exception as exc:  # pragma: no cover - provider behaviour varies
+                last_exc = exc
+                status = _provider_status_code(exc)
+                note = _sanitise_provider_error(exc)
+                transient = status in {408, 409, 425, 429, 500, 502, 503, 504} or any(
+                    token in type(exc).__name__.lower()
+                    for token in ["timeout", "connection", "ratelimit", "internalserver"]
+                )
+                errors.append(f"{model} attempt {attempt + 1}: {note}")
+                if not transient or attempt + 1 >= attempts_per_model:
+                    break
+                retry_after = 0.0
+                response = getattr(exc, "response", None)
+                try:
+                    retry_after = float((getattr(response, "headers", {}) or {}).get("retry-after") or 0)
+                except (TypeError, ValueError):
+                    retry_after = 0.0
+                delay = retry_after or min(15.0, base_delay * (2 ** attempt) + random.uniform(0, 0.75))
+                time.sleep(delay)
+
+    # Some project/model combinations may expose Chat Completions while a
+    # Responses call is temporarily unavailable. Use it only as a final recovery
+    # route, preserving the same non-storage setting.
+    if os.getenv("OPENAI_ARTICLEREADY_CHAT_FALLBACK", "1").strip().lower() not in {"0", "false", "no"}:
+        for model in candidates:
+            try:
+                chat_kwargs: dict[str, Any] = {
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": instructions},
+                        {"role": "user", "content": str(input_payload)},
+                    ],
+                    "store": False,
+                }
+                if max_output_tokens:
+                    chat_kwargs["max_completion_tokens"] = int(max_output_tokens)
+                response = client.chat.completions.create(**chat_kwargs)
+                content = response.choices[0].message.content if getattr(response, "choices", None) else ""
+                text = str(content or "").strip()
+                if text:
+                    errors.append(f"Recovered through Chat Completions using {model}.")
+                    return text, model, errors
+            except Exception as exc:  # pragma: no cover
+                last_exc = exc
+                errors.append(f"{model} chat fallback: {_sanitise_provider_error(exc)}")
+
     if last_exc:
-        raise RuntimeError("; ".join(errors)) from last_exc
-    raise RuntimeError("No configured GPT-5.6 model returned usable text.")
+        raise RuntimeError("; ".join(errors[-8:])) from last_exc
+    raise RuntimeError("No configured OpenAI model returned usable text.")
 
 
 def _article_kind(article_type: str) -> str:

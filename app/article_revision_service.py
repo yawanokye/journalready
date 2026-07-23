@@ -32,14 +32,27 @@ _REVISION_BLUE = (0, 112, 192)
 _ACTION_RED = (192, 0, 0)
 
 
+class RevisionServiceUnavailable(RuntimeError):
+    """Raised when no substantive paid revision was produced.
+
+    Propagating this exception causes the payment entitlement claim to roll back,
+    so a temporary provider failure does not consume the customer's revision.
+    """
+
+    def __init__(self, message: str, *, provider_notes: list[Any] | None = None) -> None:
+        super().__init__(message)
+        self.provider_notes = list(provider_notes or [])
+
+
 def _revision_model() -> str:
     return _normalise_gpt56_model(
         os.getenv("OPENAI_ARTICLE_REVISION_MODEL")
+        or os.getenv("OPENAI_ARTICLE_ADVANCED_MODEL")
         or os.getenv("OPENAI_ARTICLE_SOL_MODEL")
         or os.getenv("OPENAI_ARTICLE_DOCTORAL_MODEL")
         or os.getenv("OPENAI_ARTICLE_RESEARCH_MODEL")
         or "",
-        "gpt-5.6-sol",
+        "gpt-5.1",
     )
 
 
@@ -174,6 +187,36 @@ def _fallback_reviewer_matrix(review_comments: str) -> str:
     return "\n".join(rows)
 
 
+def _allow_non_substantive_fallback() -> bool:
+    return os.getenv("ARTICLEREADY_ALLOW_REVISION_FALLBACK", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _revision_changed(original: str, revised: str) -> bool:
+    original_clean = re.sub(r"\s+", " ", str(original or "")).strip()
+    revised_clean = re.sub(r"\s+", " ", str(revised or "")).strip()
+    if not revised_clean or revised_clean == original_clean:
+        return False
+    if len(revised_clean) < max(100, int(len(original_clean) * 0.45)):
+        return False
+    return True
+
+
+def _public_revision_failure(provider_errors: list[Any]) -> RevisionServiceUnavailable:
+    notes: list[str] = []
+    for item in provider_errors[-8:]:
+        if isinstance(item, dict):
+            provider = str(item.get("provider") or "provider")
+            error = str(item.get("error") or "temporary error")
+            notes.append(f"{provider}: {error[:180]}")
+        else:
+            notes.append(str(item)[:220])
+    return RevisionServiceUnavailable(
+        "The revision service could not produce a substantive revised manuscript. "
+        "No revision entitlement has been consumed. Please try again after checking the configured OpenAI model and API access.",
+        provider_notes=notes,
+    )
+
+
 def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
     article_text = _finalise_article_text(str(payload.get("article_text") or ""))
     if len(article_text) < 100:
@@ -197,6 +240,11 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
     model_used = "none"
 
     if not client or os.getenv("ARTICLEREADY_REVISION_USE_AI", "1").strip().lower() in {"0", "false", "no"}:
+        provider_errors.append(
+            "OpenAI revision client is unavailable. Confirm that OPENAI_API_KEY is configured and the openai package is installed."
+        )
+        if not _allow_non_substantive_fallback():
+            raise _public_revision_failure(provider_errors)
         revised_article = article_text
         revision_report = _fallback_revision_report(payload, source_records, provider_errors)
         reviewer_matrix = _fallback_reviewer_matrix(str(payload.get("review_comments") or ""))
@@ -279,7 +327,7 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
             raw, model_used, attempt_notes = _call_openai_response_with_fallback(
                 client,
                 primary_model=model,
-                fallback_model=os.getenv("OPENAI_ARTICLE_TERRA_MODEL", "gpt-5.6-terra"),
+                fallback_model=os.getenv("OPENAI_ARTICLE_STANDARD_MODEL") or os.getenv("OPENAI_ARTICLE_TERRA_MODEL") or "gpt-5-mini",
                 instructions=(
                     "You are ArticleReady AI's senior journal article revision editor. Revise rigorously but preserve the study's confirmed evidence, "
                     "valid citations and substantive authorial voice. Apply the supplied strong human-supervised academic writing layer to produce natural, "
@@ -293,15 +341,37 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
             )
             provider_errors.extend(attempt_notes)
             revised_article, revision_report, reviewer_matrix = _split_revision_package(raw)
-            if not revised_article:
-                revised_article = article_text
+            if not _revision_changed(article_text, revised_article):
+                raise RuntimeError("The model returned no substantive revised manuscript.")
             if not revision_report:
-                revision_report = _fallback_revision_report(payload, source_records, ["The revision model returned no separate report."])
+                report_prompt = {
+                    "task": "Prepare only the Revision and Publishability Report for the supplied original and revised article.",
+                    "article_title": article_inputs["article_title"],
+                    "article_type": article_inputs["article_type"],
+                    "original_article": article_text,
+                    "revised_article": revised_article,
+                    "reviewer_comments": article_inputs["reviewer_comments"],
+                    "requirements": prompt["revision_report_requirements"],
+                    "output": "Return the report only, in Markdown, without code fences.",
+                }
+                recovered_report, recovered_model, report_notes = _call_openai_response_with_fallback(
+                    client,
+                    primary_model=model_used or model,
+                    fallback_model=os.getenv("OPENAI_ARTICLE_STANDARD_MODEL") or os.getenv("OPENAI_ARTICLE_TERRA_MODEL") or "gpt-5-mini",
+                    instructions="Write a precise, evidence-grounded journal revision report. Do not claim that unperformed analysis was completed.",
+                    input_payload=json.dumps(report_prompt, ensure_ascii=False, indent=2),
+                    max_output_tokens=int(os.getenv("ARTICLEREADY_REVISION_REPORT_MAX_OUTPUT_TOKENS", "7000") or 7000),
+                )
+                revision_report = recovered_report
+                model_used = recovered_model or model_used
+                provider_errors.extend(report_notes)
             if payload.get("review_comments") and payload.get("include_reviewer_response_matrix", True) and not reviewer_matrix:
                 reviewer_matrix = _fallback_reviewer_matrix(str(payload.get("review_comments") or ""))
             mode = "ai_revision"
         except Exception as exc:
             provider_errors.append(f"OpenAI article revision failed: {str(exc)[:220]}")
+            if not _allow_non_substantive_fallback():
+                raise _public_revision_failure(provider_errors) from exc
             revised_article = article_text
             revision_report = _fallback_revision_report(payload, source_records, provider_errors)
             reviewer_matrix = _fallback_reviewer_matrix(str(payload.get("review_comments") or ""))

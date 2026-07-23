@@ -8,8 +8,8 @@ from fastapi.responses import StreamingResponse
 from app.article_ideas_service import generate_article_ideas
 from app.article_ideas_export import export_article_ideas_docx
 from app.article_service import draft_journal_article, export_article_docx, find_article_sources
-from app.article_revision_service import export_revised_article_docx, revise_article
-from app.file_extractor import extract_uploaded_text
+from app.article_revision_service import RevisionServiceUnavailable, export_revised_article_docx, revise_article
+from app.file_extractor import MAX_UPLOAD_BYTES, extract_uploaded_text, read_upload_limited
 from app.research_resources import discover_research_resources
 from app.payments.guard import PaymentRequiredError, credentials_from_headers, make_payment_required_detail, paid_article_action
 from app.schemas import (
@@ -149,7 +149,7 @@ def search_article_sources(payload: ArticleSourceSearchRequest) -> dict[str, Any
 @router.post("/articles/extract-file")
 async def extract_article_file(file: UploadFile = File(...)) -> dict[str, Any]:
     try:
-        content = await file.read()
+        content = await read_upload_limited(file, MAX_UPLOAD_BYTES)
         return extract_uploaded_text(file.filename or "upload", content)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -227,6 +227,16 @@ def revise_existing_article(payload: ArticleRevisionRequest, request: Request) -
             raise _payment_exception("revision", plan_key, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RevisionServiceUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "revision_service_unavailable",
+                "message": str(exc),
+                "retryable": True,
+                "provider_notes": exc.provider_notes[:8],
+            },
+        ) from exc
     except HTTPException:
         raise
     except Exception as exc:
