@@ -1,3 +1,17 @@
+# ArticleReady AI 2.1.0 - Security and revision recovery
+
+- Added OpenAI SDK and missing document-processing dependencies.
+- Replaced rigid Terra/Sol-only model validation with environment-driven model routing.
+- Added bounded OpenAI retries, model fallback and Chat Completions recovery.
+- Added `store=false` to manuscript model requests.
+- Prevented failed paid revisions from returning the original manuscript as completed output.
+- Added retryable 503 errors that roll back entitlement usage.
+- Added Semantic Scholar API-key support, 429 retry and provider cooldown.
+- Added strict CORS, trusted hosts, rate limits, body limits and security headers.
+- Added streaming upload limits, Office archive checks and PDF page limits.
+- Added robots, sitemap, favicon, security.txt and noindex protection for private pages.
+- Moved developer access tokens from localStorage to sessionStorage.
+
 ## 2.6.1
 
 - Added a controlled one-time administrator password reset using `VPROF_RESET_ADMIN_PASSWORD_ON_STARTUP=true`.

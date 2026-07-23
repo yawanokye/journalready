@@ -1,86 +1,120 @@
-# V-Professor Supervisory Review 2.5.0
+# ArticleReady AI 2.1.0
 
-V-Professor provides degree-calibrated supervisory review and external assessment for Bachelor’s, Non-Research Master’s, Research Master’s/MPhil, Professional Doctorate and PhD work.
+ArticleReady AI supports journal-article topic development, scholarly-source discovery, full article drafting, article revision, DOCX export and an auditable Review Evidence Workspace.
 
-## Current-submission-only review
+## Main modules
 
-Every uploaded work is treated as evidence for that review job only. A thesis, dissertation, chapter or benchmark used to test the system is an example, not a reusable model for later submissions.
+- **Article Topic Ideas**: develops article-ready topic portfolios and exports them to DOCX.
+- **Article Writer**: produces staged empirical articles and complete conceptual, systematic, scoping, integrative and bibliometric manuscripts when the required evidence is available.
+- **Article Revision**: substantively revises an existing article, prepares a publication-readiness report and creates a reviewer-response matrix.
+- **Review Evidence Workspace**: imports database records, manages duplicate decisions and screening, calculates verified record-flow counts and exports the evidence ledger and protocol audit.
+- **Payments and developer access**: supports Paystack, Stripe and restricted developer testing.
 
-V-Professor therefore:
+## Revision reliability in 2.1.0
 
-- builds the study context afresh from the current title, purpose, objectives, questions, scope and submitted chapters;
-- does not retain names, institutions, locations, constructs, sectors, examples or detected weaknesses as rules for another job;
-- keeps earlier chapters only when they belong to the same submission and are supplied for alignment;
-- removes sample, benchmark, learned-rule and prior-submission fields before provider calls and before the final finding ledger;
-- applies only generic academic, methodological, statistical, language and citation standards across jobs.
+ArticleReady no longer returns the original manuscript as though a paid revision was completed when the model is unavailable.
 
-## Natural and reconciled comments
+The revision workflow now:
 
-Native Word comments and inline annotations use connected supervisory prose. They do not expose mechanical labels such as `Issue`, `Problem identified`, `Action required` or `Verification`.
+- accepts model IDs configured for the operator's OpenAI project;
+- retries transient provider errors with bounded exponential backoff;
+- tries a configured model fallback chain;
+- can recover through Chat Completions when the Responses endpoint is temporarily unavailable;
+- sends OpenAI requests with `store=false` by default;
+- returns a retryable `503 revision_service_unavailable` response when no substantive revision is produced;
+- allows the payment entitlement claim to roll back on that failure.
 
-Related concerns with one root cause are consolidated before numbering. Findings attached to the same exact paragraph share one numbered comment box. Every released finding number must appear in the annotated output and in the appended correction register.
-
-Comments already present in an uploaded Word document are retained but labelled as previous source-document comments so that they are not mistaken for the current V-Professor review.
-
-## Accuracy controls in 2.5.0
-
-- Reads the complete section before declaring content missing.
-- Preserves verified section-contract findings while suppressing heuristic false positives.
-- Distinguishes present-but-weak content from absent content.
-- Does not require hypotheses unless the programme contract or confirmed methodology requires them.
-- Detects research design and submission stage before applying methodology or results checks.
-- Consolidates repeated background, problem-gap, construct-definition, significance, framework and regression-protocol findings.
-- Generates study-specific actions from the current submission without hardcoded topic, institution or location examples.
-- Separates current findings from older comments embedded in the source document.
-
-## Provider selection and cost control
-
-Use the same provider settings on the web service and worker.
-
-OpenAI:
+Keep this production setting:
 
 ```env
-VPROF_PRIMARY_PROVIDER=openai
-VPROF_ENABLE_OPENAI=true
-VPROF_ENABLE_DEEPSEEK=false
-OPENAI_API_KEY=your-key
-VPROF_FALLBACK_PROVIDER=none
-VPROF_PROVIDER_FAILOVER=false
+ARTICLEREADY_ALLOW_REVISION_FALLBACK=0
 ```
 
-DeepSeek Pro route:
+## Source-provider resilience
+
+Semantic Scholar can use an API key through:
 
 ```env
-VPROF_PRIMARY_PROVIDER=deepseek
-VPROF_ENABLE_DEEPSEEK=true
-VPROF_ENABLE_OPENAI=false
-DEEPSEEK_API_KEY=your-key
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_REVIEW_MODEL=deepseek-v4-pro
-DEEPSEEK_ADVANCED_MODEL=deepseek-v4-pro
-DEEPSEEK_QUALITY_MODEL=deepseek-v4-pro
-DEEPSEEK_FAST_MODEL=deepseek-v4-flash
-DEEPSEEK_PRIMARY_THINKING_ENABLED=false
-DEEPSEEK_AUDIT_THINKING_ENABLED=true
-DEEPSEEK_TRUNCATION_RECOVERY=true
-DEEPSEEK_COVERAGE_UNITS_PER_REQUEST=1
-DEEPSEEK_COVERAGE_HIGH_RISK_UNITS_PER_REQUEST=1
-VPROF_FALLBACK_PROVIDER=none
-VPROF_PROVIDER_FAILOVER=false
+SEMANTIC_SCHOLAR_API_KEY=<secret>
 ```
 
-## Deployment
+Metadata providers use bounded retries and temporary cooldown after HTTP 429. A temporary failure from one source provider is recorded as a warning and does not by itself disable the revision model.
 
-Web service:
+## Security controls
+
+- Explicit host allow-list and restricted CORS origins
+- Route-specific rate limiting
+- Request and upload-size limits
+- DOCX/XLSX archive-bomb and unsafe-path checks
+- PDF page-count limit
+- Content Security Policy
+- HSTS on HTTPS
+- Clickjacking, MIME-sniffing, referrer and permissions headers
+- `no-store` for API and private workspace responses
+- API documentation disabled by default
+- Developer token stored only for the browser session
+- `robots.txt`, `sitemap.xml`, favicon and `security.txt`
+- `noindex` on developer, payment-recovery and review-workspace pages
+
+## Local setup
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port $PORT
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+cp .env.example .env
+uvicorn app.main:app --reload
 ```
 
-Background worker:
+On Windows PowerShell:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+copy .env.example .env
+uvicorn app.main:app --reload
+```
+
+## Essential production variables
+
+```env
+OPENAI_API_KEY=<secret>
+OPENAI_ARTICLE_STANDARD_MODEL=gpt-5-mini
+OPENAI_ARTICLE_ADVANCED_MODEL=gpt-5.1
+OPENAI_ARTICLE_REVISION_MODEL=gpt-5.1
+OPENAI_ARTICLE_FALLBACK_MODELS=gpt-5.1,gpt-5,gpt-5-mini
+ARTICLEREADY_REVISION_USE_AI=1
+ARTICLEREADY_ALLOW_REVISION_FALLBACK=0
+
+ARTICLEREADY_SQLITE_DB_PATH=/var/data/articleready_payments.db
+ARTICLEREADY_REVIEW_DB_PATH=/var/data/articleready_review_workspace.db
+
+ARTICLEREADY_ALLOWED_HOSTS=articlereadyai.com,www.articlereadyai.com,*.onrender.com
+ARTICLEREADY_ALLOWED_ORIGINS=https://articlereadyai.com,https://www.articlereadyai.com
+ARTICLEREADY_RATE_LIMIT_ENABLED=1
+ARTICLEREADY_HSTS_ENABLED=1
+ARTICLEREADY_ENABLE_API_DOCS=0
+```
+
+Set model variables to model IDs that are actually available to the OpenAI project. The older `OPENAI_ARTICLE_TERRA_MODEL` and `OPENAI_ARTICLE_SOL_MODEL` names remain accepted for backward compatibility.
+
+## Validation
 
 ```bash
-python -m app.worker
+PYTHONPATH=. pytest -q \
+  tests/test_article_workflows.py \
+  tests/test_developer_access.py \
+  tests/test_humanisation_layer.py \
+  tests/test_humanizer_citation_topic_export.py \
+  tests/test_payments.py \
+  tests/test_review_protocol.py \
+  tests/test_review_workspace.py \
+  tests/test_security_hardening.py
+
+python -m compileall -q app
+node --check app/static/article_revision.js
+node --check app/static/articleready_payments.js
 ```
 
-Both services must use the same `DATABASE_URL`, provider choice and provider API key. Deploy the package to both services and submit unfinished reviews as new jobs because the 2.5.0 checkpoint identifiers differ from earlier releases. See `DEPLOYMENT.md` and `.env.example`.
+See `DEPLOYMENT.md` and `SECURITY_AND_REVISION_RECOVERY_UPDATE.md` for deployment details.

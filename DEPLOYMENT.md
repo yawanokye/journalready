@@ -1,208 +1,119 @@
-# V-Professor v2.5.0 Deployment Guide
+# ArticleReady AI 2.1.0 Deployment Guide
 
-## Architecture
+## Render service
 
-Deploy three Render resources:
-
-1. PostgreSQL database: `vprofessor-db`
-2. Web service: `vprofessor-web`
-3. Background worker: `vprofessor-worker`
-
-The included `render.yaml` creates all three and applies one shared environment definition to the web service and worker.
-
-## Commands
-
-Web service:
+Deploy one Python web service from the repository.
 
 ```text
-Build: python -m pip install -r requirements.txt
-Start: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+Build command: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+Start command: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips='*'
+Health check: /health
 ```
 
-Background worker:
+The included `render.yaml` defines a Starter service named `journalready` and a 1 GB persistent disk mounted at `/var/data`.
 
-```text
-Build: python -m pip install -r requirements.txt
-Start: python -m app.worker
+## Persistent storage
+
+Use:
+
+```env
+ARTICLEREADY_SQLITE_DB_PATH=/var/data/articleready_payments.db
+ARTICLEREADY_REVIEW_DB_PATH=/var/data/articleready_review_workspace.db
 ```
 
-## Required secrets
+Only data written below the disk mount persists across deploys.
 
-Set the API key for the selected provider in Render. Render generates `SESSION_SECRET` and injects `DATABASE_URL` from the PostgreSQL resource when the Blueprint is used.
+## OpenAI configuration
 
-For a manual deployment, set:
+Set:
 
 ```env
 OPENAI_API_KEY=<secret>
-DEEPSEEK_API_KEY=<secret-if-selected>
-SESSION_SECRET=<long-random-secret>
-DATABASE_URL=<postgresql-connection-string>
+OPENAI_ARTICLE_STANDARD_MODEL=gpt-5-mini
+OPENAI_ARTICLE_ADVANCED_MODEL=gpt-5.1
+OPENAI_ARTICLE_REVISION_MODEL=gpt-5.1
+OPENAI_ARTICLE_FALLBACK_MODELS=gpt-5.1,gpt-5,gpt-5-mini
+OPENAI_ARTICLEREADY_TIMEOUT_SECONDS=180
+OPENAI_ARTICLEREADY_SDK_RETRIES=2
+OPENAI_ARTICLEREADY_ATTEMPTS_PER_MODEL=2
+OPENAI_ARTICLEREADY_CHAT_FALLBACK=1
+ARTICLEREADY_REVISION_USE_AI=1
+ARTICLEREADY_ALLOW_REVISION_FALLBACK=0
 ```
 
-The web service and worker must use the same `DATABASE_URL`. The same `SESSION_SECRET` may be shared, although only the web service uses browser sessions.
+Model variables are operator-controlled. Use identifiers available to the OpenAI project. The application no longer limits the values to Terra or Sol labels.
 
-## Shared job and artifact storage
+`ARTICLEREADY_ALLOW_REVISION_FALLBACK=0` is important. When no substantive revision is produced, the API returns 503 and the paid entitlement claim is rolled back instead of returning the original manuscript as completed work.
 
-Keep:
+## Scholarly metadata providers
+
+Recommended:
 
 ```env
-VPROF_DB_ARTIFACT_STORAGE=true
-VPROF_RUN_JOBS_IN_WEB=false
-REVIEW_STORAGE_DIR=/tmp/vprofessor/reviews
-REVIEW_STORAGE_FALLBACK_DIR=/tmp/vprofessor/reviews
+SEMANTIC_SCHOLAR_API_KEY=<secret>
+OPENALEX_MAILTO=aadam@ucc.edu.gh
+CROSSREF_MAILTO=aadam@ucc.edu.gh
+ARTICLEREADY_METADATA_MAX_ATTEMPTS=3
+ARTICLEREADY_METADATA_429_COOLDOWN_SECONDS=60
 ```
 
-Render services do not share their local file systems. Database-backed artifact storage allows the worker to read uploads queued by the web service and allows the web service to deliver completed reports.
+A Semantic Scholar 429 is treated as a temporary provider warning. OpenAlex and Crossref results can still support the source bank while the cooldown is active.
 
-## Worker controls
-
-Recommended starting configuration:
+## Payments
 
 ```env
-VPROF_WORKER_CONCURRENCY=1
-VPROF_WORKER_CLAIM_LIMIT=1
-VPROF_WORKER_POLL_SECONDS=8
-JOB_HEARTBEAT_SECONDS=30
-JOB_LEASE_SECONDS=180
-JOB_STALE_AFTER_SECONDS=240
-AUTO_RESUME_JOBS=true
-MAX_AUTO_RESUMES=2
+ARTICLEREADY_PAYMENT_REQUIRED=1
+APP_BASE_URL=https://articlereadyai.com
+PAYSTACK_SECRET_KEY=<secret>
+STRIPE_SECRET_KEY=<secret>
+STRIPE_WEBHOOK_SECRET=<secret>
 ```
 
-Increase worker concurrency only after monitoring OpenAI rate limits, memory, database load and average job duration.
+Provider callbacks and webhook URLs remain those configured for the ArticleReady payment routes.
 
-## Review models
-
-The production route uses:
+## Developer access
 
 ```env
-OPENAI_SECTION_ANALYSIS_MODEL=gpt-5.6-terra
-OPENAI_FINAL_SYNTHESIS_MODEL=gpt-5.6-sol
-OPENAI_PHD_FINAL_SYNTHESIS_MODEL=gpt-5.6-sol
-OPENAI_EXTERNAL_ADJUDICATOR_MODEL=gpt-5.6-sol
+ARTICLEREADY_DEVELOPER_ACCESS_ENABLED=1
+ARTICLEREADY_DEVELOPER_ACCESS_EMAIL=aadam@ucc.edu.gh
+ARTICLEREADY_DEVELOPER_ACCESS_CODE_SHA256=<64-character-sha256>
+ARTICLEREADY_DEVELOPER_ACCESS_SECRET=<separate-long-random-secret>
+ARTICLEREADY_DEVELOPER_SESSION_HOURS=12
 ```
 
-Terra handles routine extraction and section review. Sol handles bounded final synthesis and external-examiner adjudication.
+The signing secret must be separate from the six-digit code hash. The browser stores the developer token in `sessionStorage`, so closing the browser session removes it.
 
-For DeepSeek as the selected provider, use the same settings on the web service and worker:
+## Security configuration
 
 ```env
-VPROF_PRIMARY_PROVIDER=deepseek
-VPROF_ENABLE_DEEPSEEK=true
-VPROF_ENABLE_OPENAI=false
-DEEPSEEK_REVIEW_MODEL=deepseek-v4-pro
-DEEPSEEK_QUALITY_MODEL=deepseek-v4-pro
-DEEPSEEK_FAST_MODEL=deepseek-v4-flash
-DEEPSEEK_PRIMARY_THINKING_ENABLED=false
-DEEPSEEK_AUDIT_THINKING_ENABLED=true
-DEEPSEEK_TRUNCATION_RECOVERY=true
-DEEPSEEK_MAX_OUTPUT_TOKENS=12000
-DEEPSEEK_PRIMARY_MAX_OUTPUT_TOKENS=7000
-DEEPSEEK_SINGLE_TARGET_RECOVERY_MAX_OUTPUT_TOKENS=4200
-DEEPSEEK_COMPACT_ISSUE_LIMIT_PER_TARGET=2
-DEEPSEEK_COVERAGE_PARAGRAPHS_PER_UNIT=3
-DEEPSEEK_COVERAGE_UNIT_MAX_CHARS=7000
-DEEPSEEK_COVERAGE_TABLE_ROWS_PER_UNIT=4
-DEEPSEEK_COVERAGE_UNITS_PER_REQUEST=1
-DEEPSEEK_COVERAGE_HIGH_RISK_UNITS_PER_REQUEST=1
-DEEPSEEK_COVERAGE_REQUEST_MAX_CHARS=9000
+ARTICLEREADY_ALLOWED_HOSTS=articlereadyai.com,www.articlereadyai.com,*.onrender.com,localhost,127.0.0.1,testserver
+ARTICLEREADY_ALLOWED_ORIGINS=https://articlereadyai.com,https://www.articlereadyai.com
+ARTICLEREADY_TRUST_PROXY_HEADERS=1
+ARTICLEREADY_RATE_LIMIT_ENABLED=1
+ARTICLEREADY_HSTS_ENABLED=1
+ARTICLEREADY_ENABLE_API_DOCS=0
+ARTICLEREADY_SECURITY_CONTACT=mailto:aadam@ucc.edu.gh
 ```
 
-These provider-specific packet limits are intentionally lower than the general coverage limits. They prevent repeated cut-off JSON responses and are usually cheaper than retrying large failed packets.
-
-
-## Current-submission isolation
-
-The application rebuilds study context for every job. Example and benchmark documents do not become rules for later submissions. Previous chapters are retained only when they belong to the same submitted work and are intentionally supplied for alignment. Do not add sample documents, sample findings or learned topic terms to environment variables or production prompts.
-
-## Native and inline comments
-
-Recommended settings:
-
-```env
-VPROF_NATIVE_COMMENT_STYLE=exact_anchor_grouped
-VPROF_EXPORT_ONE_COMMENT_PER_FINDING=false
-VPROF_COMMENT_MERGE_BY_SECTION=false
-VPROF_MAX_ITEMS_PER_NATIVE_COMMENT=20
-VPROF_NATIVE_GROUP_LOCATION_MARKERS=false
-VPROF_HUMAN_ROOT_CAUSE_CONSOLIDATION=true
-VPROF_EXISTING_COMMENT_POLICY=label
-```
-
-`VPROF_EXISTING_COMMENT_POLICY=label` keeps comments already present in the uploaded DOCX but prefixes them as previous source-document comments. They are excluded from current finding reconciliation.
-
-All released findings attached to the same paragraph share one numbered, natural Word comment. Findings attached to different paragraphs remain separate. Visible labels such as Issue, Problem identified, Action required and Verification are not shown. Visible location markers are disabled to protect decimals, citations, equations and DOI strings.
-
-## Section-scoped review
-
-The web interface lets supervisors scan the uploaded chapter, select one or more detected sections and submit only those boundaries for review. Whole-chapter review remains the default. External assessment, full-thesis review and combined-chapter review ignore subsection selection and review the complete submitted scope.
-
-## Degree structure
-
-Bachelor’s, Non-Research Master’s, Research Master’s/MPhil and Professional Doctorate work uses the standard five-chapter research architecture as the default. A PhD may use a variable chapter structure, but the system checks for all prescribed doctoral functions and their integration.
-
-## Administrator bootstrap
-
-Set the following on the web service only when creating the first administrator:
-
-```env
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=<strong-password>
-ADMIN_EMAIL=<email>
-ADMIN_NAME=System Administrator
-```
-
-These values do not overwrite an administrator already stored in PostgreSQL during normal startup.
-
-For a controlled one-time reset of the stored administrator credential, set:
-
-```env
-VPROF_RESET_ADMIN_PASSWORD_ON_STARTUP=true
-```
-
-Redeploy the web service, sign in with `ADMIN_USERNAME` and `ADMIN_PASSWORD`, then immediately set the flag back to `false` and redeploy. The application logs whether the reset was applied but never prints the configured password. A trusted Render Shell may alternatively run `python scripts/reset_admin_password.py`.
+Do not use `*` for allowed CORS origins. Add a staging domain explicitly when needed.
 
 ## Deployment sequence
 
-1. Stop or allow active legacy jobs to finish.
-2. Deploy the database, web service and worker from `render.yaml`.
-3. Add `OPENAI_API_KEY`.
-4. Confirm both services are Live.
-5. Check worker logs for the startup message.
-6. Submit a short test chapter.
-7. Confirm the status moves from queued to document preparation within one or two polling cycles.
-8. Confirm the output contains the annotated DOCX, inline-annotated DOCX and supervisory action report.
+1. Attach the disk at `/var/data`.
+2. Add the required environment variables and secrets.
+3. Commit the updated source.
+4. Use **Manual Deploy → Clear build cache & deploy**.
+5. Confirm `/health`, `/robots.txt` and `/favicon.ico` return `200`.
+6. Open `/article-revision` and hard-refresh once.
+7. Run a developer-access revision test.
+8. Confirm a provider failure returns `503 revision_service_unavailable` and does not consume the revision entitlement.
+9. Confirm a successful revision returns `mode: ai_revision` and enables DOCX export.
 
-Old review checkpoints should not be reused because the v2.5.0 isolation, natural-comment and evidence-ledger identifiers changed.
-
-## Validation
-
-Run locally before deployment:
+## Validation before deployment
 
 ```bash
-PYTHONPATH=. pytest -q
 python -m compileall -q app
-node --check app/static/app.js
+node --check app/static/article_revision.js
+node --check app/static/articleready_payments.js
+PYTHONPATH=. pytest -q tests/test_article_workflows.py tests/test_developer_access.py tests/test_humanisation_layer.py tests/test_humanizer_citation_topic_export.py tests/test_payments.py tests/test_review_protocol.py tests/test_review_workspace.py tests/test_security_hardening.py
 ```
-
-## Selecting OpenAI or DeepSeek in Render
-
-Add the provider configuration to both `vprofessor-web` and `vprofessor-worker`, or edit the shared environment anchor in `render.yaml`.
-
-For DeepSeek V4 Pro, set:
-
-```env
-VPROF_PRIMARY_PROVIDER=deepseek
-VPROF_ENABLE_DEEPSEEK=true
-VPROF_ENABLE_OPENAI=false
-DEEPSEEK_API_KEY=<secret>
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_QUALITY_MODEL=deepseek-v4-pro
-DEEPSEEK_ADVANCED_MODEL=deepseek-v4-pro
-DEEPSEEK_REVIEW_MODEL=deepseek-v4-pro
-DEEPSEEK_FAST_MODEL=deepseek-v4-flash
-VPROF_PROVIDER_FAILOVER=false
-VPROF_FALLBACK_PROVIDER=none
-```
-
-For OpenAI, set `VPROF_PRIMARY_PROVIDER=openai`, enable OpenAI, disable DeepSeek, and provide `OPENAI_API_KEY`. Redeploy the web service and worker after changing providers. Unfinished jobs should be submitted again so the selected provider is recorded in the new job route.
