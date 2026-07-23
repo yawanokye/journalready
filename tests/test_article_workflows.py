@@ -1,3 +1,5 @@
+import pytest
+
 from app.article_ideas_service import generate_article_ideas
 from app.article_service import draft_journal_article, export_article_docx
 
@@ -262,10 +264,34 @@ def test_source_query_deduplicates_repeated_topic_and_context():
     assert query.lower().count("term structure of interest rate in ghana") == 1
 
 
-def test_article_revision_fallback_preserves_article_and_reports_actions(monkeypatch):
+def test_article_revision_failure_does_not_return_original_as_completed(monkeypatch):
+    from app.article_revision_service import RevisionServiceUnavailable, revise_article
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("ARTICLEREADY_ALLOW_REVISION_FALLBACK", "0")
+    original = (
+        "# Digital procurement and expenditure\n\n"
+        "## Introduction\n\nDigital procurement may affect public expenditure outcomes. "
+        "The study examines this relationship using cross-country data.\n\n"
+        "## Methods\n\nThe study uses panel regression and governance controls.\n\n"
+        "## Results\n\nThe confirmed coefficient is -0.12 with p = 0.04."
+    )
+    with pytest.raises(RevisionServiceUnavailable):
+        revise_article(
+            {
+                "article_title": "Digital procurement and expenditure",
+                "article_text": original,
+                "review_comments": "Clarify the theoretical contribution.\nAdd robustness analysis.",
+                "include_source_search": False,
+            }
+        )
+
+
+def test_article_revision_diagnostic_fallback_requires_explicit_opt_in(monkeypatch):
     from app.article_revision_service import revise_article
 
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("ARTICLEREADY_ALLOW_REVISION_FALLBACK", "1")
     original = (
         "# Digital procurement and expenditure\n\n"
         "## Introduction\n\nDigital procurement may affect public expenditure outcomes. "
@@ -282,8 +308,6 @@ def test_article_revision_fallback_preserves_article_and_reports_actions(monkeyp
         }
     )
     assert result["revised_article_text"] == original
-    assert "Revision and Publishability Report" in result["revision_report"]
-    assert "Clarify the theoretical contribution" in result["reviewer_response_matrix"]
     assert result["mode"] == "metadata_fallback"
 
 
@@ -404,17 +428,19 @@ def test_long_article_length_plan_and_token_estimate(monkeypatch):
     assert result["batch_drafting_applied"] is False  # no API key, so fallback text is used
 
 
-def test_gpt56_terra_sol_model_routing(monkeypatch):
+def test_configured_standard_and_advanced_model_routing(monkeypatch):
     from app.article_service import _select_article_model
-    monkeypatch.setenv('OPENAI_ARTICLE_TERRA_MODEL', 'gpt-5.6-terra')
-    monkeypatch.setenv('OPENAI_ARTICLE_SOL_MODEL', 'gpt-5.6-sol')
-    assert _select_article_model('Bachelors', 'Empirical research article', {'target_word_count': 7000}) == 'gpt-5.6-terra'
-    assert _select_article_model('Research Masters (e.g. MPhil)', 'Empirical research article', {'target_word_count': 7000}) == 'gpt-5.6-sol'
-    assert _select_article_model('Bachelors', 'Systematic review article', {'target_word_count': 7000}) == 'gpt-5.6-sol'
-    assert _select_article_model('Bachelors', 'Empirical research article', {'target_word_count': 11000}) == 'gpt-5.6-sol'
-    monkeypatch.delenv('OPENAI_ARTICLE_TERRA_MODEL', raising=False)
-    monkeypatch.setenv('OPENAI_ARTICLE_BACHELOR_MODEL', 'gpt-5.4')
-    assert _select_article_model('Bachelors', 'Empirical research article', {'target_word_count': 7000}) == 'gpt-5.6-terra'
+
+    monkeypatch.setenv('OPENAI_ARTICLE_STANDARD_MODEL', 'gpt-5-mini')
+    monkeypatch.setenv('OPENAI_ARTICLE_ADVANCED_MODEL', 'gpt-5.1')
+    assert _select_article_model('Bachelors', 'Empirical research article', {'target_word_count': 7000}) == 'gpt-5-mini'
+    assert _select_article_model('Research Masters (e.g. MPhil)', 'Empirical research article', {'target_word_count': 7000}) == 'gpt-5.1'
+    assert _select_article_model('Bachelors', 'Systematic review article', {'target_word_count': 7000}) == 'gpt-5.1'
+    assert _select_article_model('Bachelors', 'Empirical research article', {'target_word_count': 11000}) == 'gpt-5.1'
+
+    monkeypatch.delenv('OPENAI_ARTICLE_STANDARD_MODEL', raising=False)
+    monkeypatch.setenv('OPENAI_ARTICLE_BACHELOR_MODEL', 'account-specific-model')
+    assert _select_article_model('Bachelors', 'Empirical research article', {'target_word_count': 7000}) == 'account-specific-model'
 
 
 def test_thesisready_humanizer_preserves_scholarly_evidence():
