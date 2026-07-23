@@ -144,6 +144,9 @@ form.addEventListener('submit', async (event) => {
       : await fetch('/api/articles/revise', requestOptions);
     const data = await readApiResponse(response);
     if (response.status === 402 && window.ArticleReadyPayments) { ArticleReadyPayments.openFromApi(data.detail || {}); return; }
+    if (response.status === 503 && data?.detail?.code === 'revision_service_unavailable') {
+      throw new Error(apiErrorMessage(data.detail, 'The revision service is temporarily unavailable. Your paid revision remains available.'));
+    }
     if (!response.ok) throw new Error(apiErrorMessage(data.detail ?? data, 'Article revision failed.'));
     lastResult = data;
     revisedArticle.value = data.revised_article_text || '';

@@ -48,27 +48,39 @@
 
   function readDeveloperAccess() {
     try {
-      const value = JSON.parse(localStorage.getItem(DEVELOPER_STORAGE_KEY) || '{}') || {};
+      // Developer access is deliberately session-scoped. Migrate any older
+      // localStorage record once, then remove the persistent copy.
+      const legacy = localStorage.getItem(DEVELOPER_STORAGE_KEY);
+      if (legacy && !sessionStorage.getItem(DEVELOPER_STORAGE_KEY)) {
+        sessionStorage.setItem(DEVELOPER_STORAGE_KEY, legacy);
+      }
+      localStorage.removeItem(DEVELOPER_STORAGE_KEY);
+      const value = JSON.parse(sessionStorage.getItem(DEVELOPER_STORAGE_KEY) || '{}') || {};
       if (!value.developer_token || !value.expires_at || Number(value.expires_at) * 1000 <= Date.now()) {
-        localStorage.removeItem(DEVELOPER_STORAGE_KEY);
+        sessionStorage.removeItem(DEVELOPER_STORAGE_KEY);
         return null;
       }
       return value;
     } catch (_) {
+      sessionStorage.removeItem(DEVELOPER_STORAGE_KEY);
       localStorage.removeItem(DEVELOPER_STORAGE_KEY);
       return null;
     }
   }
   function rememberDeveloperAccess(access) {
     if (!access?.developer_token || !access?.expires_at) return;
-    localStorage.setItem(DEVELOPER_STORAGE_KEY, JSON.stringify({
+    sessionStorage.setItem(DEVELOPER_STORAGE_KEY, JSON.stringify({
       developer_token: access.developer_token,
       expires_at: access.expires_at,
       email: access.email || '',
       saved_at: new Date().toISOString(),
     }));
+    localStorage.removeItem(DEVELOPER_STORAGE_KEY);
   }
-  function clearDeveloperAccess() { localStorage.removeItem(DEVELOPER_STORAGE_KEY); }
+  function clearDeveloperAccess() {
+    sessionStorage.removeItem(DEVELOPER_STORAGE_KEY);
+    localStorage.removeItem(DEVELOPER_STORAGE_KEY);
+  }
   async function developerStatus() {
     const record = readDeveloperAccess();
     if (!record) return {ok: false, active: false, message: 'Developer access is inactive.'};
