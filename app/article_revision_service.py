@@ -3,6 +3,7 @@ from __future__ import annotations
 import difflib
 import io
 import json
+import logging
 import os
 import re
 from datetime import datetime
@@ -19,6 +20,7 @@ from app.article_service import (
     _humanize_article_with_model,
     _humanizer_mode,
     _normalise_gpt56_model,
+    _normalise_reasoning_effort,
     _parse_inline_segments,
     _plain_inline_text,
     _safe_get_openai_client,
@@ -26,6 +28,26 @@ from app.article_service import (
     _strong_humanisation_requirements,
     _search_sources,
     _source_context,
+)
+from app.scholarly_humanizer import humanize_scholarly_text
+
+LOGGER = logging.getLogger("articleready.revision")
+
+_REVISION_HEADING_RE = re.compile(
+    r"^(?:"
+    r"#{1,6}\s+.+|"
+    r"\d+(?:\.\d+){0,4}\.?\s+[A-Z][^\n]{1,180}|"
+    r"(?:Abstract|Introduction|Background|Literature Review|Theoretical Framework|Conceptual Framework|"
+    r"Methods?|Methodology|Materials and Methods|Results?|Findings?|Discussion|Conclusion|Conclusions|"
+    r"Recommendations?|Implications?|Limitations?|Declarations?|Acknowledgements?|Funding|"
+    r"Competing Interests?|Conflict of Interest|Author Contributions?|Data Availability|Ethics Approval|"
+    r"References|Bibliography|Source Use Audit|Appendix|Appendices)"
+    r")$",
+    flags=re.IGNORECASE,
+)
+_REVISION_PROTECTED_HEADING_RE = re.compile(
+    r"^(?:#{1,6}\s*)?(?:References|Bibliography|Source Use Audit|Appendix|Appendices)\b",
+    flags=re.IGNORECASE,
 )
 
 _REVISION_BLUE = (0, 112, 192)
@@ -52,7 +74,7 @@ def _revision_model() -> str:
         or os.getenv("OPENAI_ARTICLE_DOCTORAL_MODEL")
         or os.getenv("OPENAI_ARTICLE_RESEARCH_MODEL")
         or "",
-        "gpt-5.1",
+        "gpt-5.6-terra",
     )
 
 
@@ -211,11 +233,531 @@ def _public_revision_failure(provider_errors: list[Any]) -> RevisionServiceUnava
         else:
             notes.append(str(item)[:220])
     return RevisionServiceUnavailable(
-        "The revision service could not produce a substantive revised manuscript. "
-        "No revision entitlement has been consumed. Please try again after checking the configured OpenAI model and API access.",
+        "The revision service could not complete and validate a substantive full-manuscript revision. "
+        "No revision entitlement has been consumed. Retry the request and review the processing notes or Render logs for the exact failed stage.",
         provider_notes=notes,
     )
 
+
+
+def _env_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    try:
+        value = int(str(os.getenv(name, str(default)) or default).strip())
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(value, maximum))
+
+
+def _word_count(text: str) -> int:
+    return len(re.findall(r"\b[\w’'-]+\b", str(text or ""), flags=re.UNICODE))
+
+
+def _clip_text(text: str, limit: int) -> str:
+    value = str(text or "")
+    if len(value) <= limit:
+        return value
+    return value[:limit].rstrip() + "\n\n[Content clipped for this support pass. The substantive revision still uses the complete section batches.]"
+
+
+def _revision_timeout_seconds() -> int:
+    return _env_int("ARTICLEREADY_REVISION_TIMEOUT_SECONDS", 600, minimum=120, maximum=1800)
+
+
+def _revision_reasoning() -> str:
+    return _normalise_reasoning_effort(os.getenv("OPENAI_ARTICLE_REVISION_REASONING", "xhigh"), "xhigh")
+
+
+def _revision_recovery_reasoning() -> str:
+    return _normalise_reasoning_effort(os.getenv("OPENAI_ARTICLE_REVISION_RECOVERY_REASONING", "high"), "high")
+
+
+def _revision_plan_model() -> str:
+    return _normalise_gpt56_model(
+        os.getenv("OPENAI_ARTICLE_REVISION_PLAN_MODEL")
+        or os.getenv("OPENAI_ARTICLE_FAST_MODEL")
+        or os.getenv("OPENAI_ARTICLE_LUNA_MODEL")
+        or "",
+        "gpt-5.6-luna",
+    ) or "gpt-5.6-luna"
+
+
+def _revision_escalation_model() -> str:
+    return _normalise_gpt56_model(
+        os.getenv("OPENAI_ARTICLE_ESCALATION_MODEL")
+        or os.getenv("OPENAI_ARTICLE_SOL_MODEL")
+        or "",
+        "gpt-5.6-sol",
+    ) or "gpt-5.6-sol"
+
+
+def _section_heading(text: str, fallback: str) -> str:
+    for line in str(text or "").splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped[:180]
+    return fallback
+
+
+def _split_revision_sections(article_text: str) -> list[dict[str, Any]]:
+    """Split plain extracted manuscripts using common journal headings.
+
+    DOCX extraction removes Word heading styles, so this parser recognises both
+    numbered and conventional unnumbered article headings. Reference and
+    appendix sections are marked as protected.
+    """
+    lines = str(article_text or "").splitlines()
+    sections: list[dict[str, Any]] = []
+    current: list[str] = []
+    heading = ""
+
+    def flush() -> None:
+        nonlocal current, heading
+        text = "\n".join(current).strip()
+        if text:
+            sections.append({
+                "heading": heading,
+                "text": text,
+                "protected": bool(_REVISION_PROTECTED_HEADING_RE.match(heading.strip())) if heading else False,
+                "word_count": _word_count(text),
+            })
+        current = []
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped and _REVISION_HEADING_RE.match(stripped):
+            flush()
+            heading = stripped
+            current = [line]
+        else:
+            current.append(line)
+    flush()
+    return sections or [{
+        "heading": "",
+        "text": str(article_text or "").strip(),
+        "protected": False,
+        "word_count": _word_count(article_text),
+    }]
+
+
+def _split_oversized_section(section: dict[str, Any], max_words: int) -> list[dict[str, Any]]:
+    text = str(section.get("text") or "").strip()
+    heading = str(section.get("heading") or "").strip()
+    protected = bool(section.get("protected"))
+    if _word_count(text) <= max_words or protected:
+        return [{"heading": heading, "text": text, "protected": protected, "continuation": False}]
+
+    lines = text.splitlines()
+    heading_line = ""
+    if lines and heading and lines[0].strip() == heading:
+        heading_line = lines.pop(0)
+
+    chunks: list[dict[str, Any]] = []
+    current: list[str] = []
+    current_words = 0
+    part = 0
+
+    def flush() -> None:
+        nonlocal current, current_words, part
+        if not current:
+            return
+        part += 1
+        body = "\n".join(current).strip()
+        if part == 1 and heading_line:
+            body = f"{heading_line}\n{body}".strip()
+        chunks.append({
+            "heading": heading,
+            "text": body,
+            "protected": False,
+            "continuation": part > 1,
+        })
+        current = []
+        current_words = 0
+
+    for line in lines:
+        words = _word_count(line)
+        if current and current_words + words > max_words:
+            flush()
+        current.append(line)
+        current_words += words
+    flush()
+    return chunks or [{"heading": heading, "text": text, "protected": protected, "continuation": False}]
+
+
+def _split_revision_batches(article_text: str) -> list[dict[str, Any]]:
+    max_words = _env_int("ARTICLEREADY_REVISION_SECTION_MAX_WORDS", 2400, minimum=900, maximum=5000)
+    sections = _split_revision_sections(article_text)
+    raw_batches: list[dict[str, Any]] = []
+    for section in sections:
+        raw_batches.extend(_split_oversized_section(section, max_words))
+    if not raw_batches:
+        raw_batches = [{"heading": "Complete manuscript", "text": article_text, "protected": False, "continuation": False}]
+
+    # Pack adjacent short sections together. This avoids paying for a separate
+    # high-reasoning request for a title page or very short subsection while
+    # keeping references and other protected sections isolated.
+    batches: list[dict[str, Any]] = []
+    current: list[dict[str, Any]] = []
+    current_words = 0
+
+    def flush() -> None:
+        nonlocal current, current_words
+        if not current:
+            return
+        labels = [str(item.get("heading") or "").strip() for item in current if str(item.get("heading") or "").strip()]
+        text = "\n\n".join(str(item.get("text") or "").strip() for item in current if str(item.get("text") or "").strip()).strip()
+        batches.append({
+            "heading": labels[0] if labels else "",
+            "label": " + ".join(dict.fromkeys(labels))[:220] if labels else f"Manuscript part {len(batches) + 1}",
+            "text": text,
+            "protected": False,
+            "continuation": bool(current[0].get("continuation")) if len(current) == 1 else False,
+        })
+        current = []
+        current_words = 0
+
+    for item in raw_batches:
+        item_text = str(item.get("text") or "").strip()
+        item_words = _word_count(item_text)
+        if bool(item.get("protected")):
+            flush()
+            batches.append({**item, "label": str(item.get("heading") or "Protected reference section")})
+            continue
+        if current and current_words + item_words > max_words:
+            flush()
+        current.append(item)
+        current_words += item_words
+    flush()
+
+    for index, batch in enumerate(batches, start=1):
+        batch["index"] = index
+        batch["word_count"] = _word_count(str(batch.get("text") or ""))
+        batch["label"] = str(batch.get("label") or batch.get("heading") or "").strip() or f"Manuscript part {index}"
+    return batches
+
+def _source_records_for_section(label: str, source_records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    lower = str(label or "").lower()
+    if any(token in lower for token in ["reference", "appendix", "declaration"]):
+        return []
+    if any(token in lower for token in ["method", "result", "finding", "analysis", "data"]):
+        limit = _env_int("ARTICLEREADY_REVISION_METHOD_SOURCE_CONTEXT", 16, minimum=0, maximum=40)
+    else:
+        limit = _env_int("ARTICLEREADY_REVISION_SOURCE_CONTEXT", 36, minimum=0, maximum=60)
+    return source_records[:limit]
+
+
+def _deterministic_revision_plan(payload: dict[str, Any], batches: list[dict[str, Any]]) -> str:
+    focus = _revision_focus(payload)
+    headings = [str(item.get("label") or "") for item in batches]
+    lines = [
+        "# Revision Plan",
+        "",
+        "The revision will preserve confirmed evidence, numerical results, citations and the study design while strengthening the following areas:",
+    ]
+    lines.extend(f"- {item}." for item in focus)
+    lines.extend(["", "## Manuscript sequence", ""])
+    lines.extend(f"- {heading}" for heading in headings)
+    lines.extend([
+        "",
+        "## Integrity constraints",
+        "",
+        "- Do not invent analyses, results, ethics approvals, citations or references.",
+        "- Keep unperformed analyses as precise author actions.",
+        "- Preserve the distinction between confirmed findings and recommendations for further work.",
+    ])
+    return "\n".join(lines).strip()
+
+
+def _build_revision_plan(
+    client: Any,
+    *,
+    payload: dict[str, Any],
+    article_inputs: dict[str, Any],
+    source_records: list[dict[str, Any]],
+    batches: list[dict[str, Any]],
+    provider_errors: list[Any],
+) -> tuple[str, str]:
+    fallback_plan = _deterministic_revision_plan(payload, batches)
+    if str(os.getenv("ARTICLEREADY_REVISION_PLAN_ENABLED", "1") or "1").strip().lower() in {"0", "false", "no"}:
+        return fallback_plan, "deterministic"
+
+    plan_prompt = {
+        "task": "Prepare a compact, section-specific revision plan for a journal article. Do not rewrite the manuscript in this pass.",
+        "article_profile": {key: value for key, value in article_inputs.items() if key != "existing_article"},
+        "revision_focus": _revision_focus(payload),
+        "section_inventory": [
+            {
+                "section": item.get("label"),
+                "word_count": item.get("word_count"),
+                "continuation": bool(item.get("continuation")),
+                "protected_reference_section": bool(item.get("protected")),
+            }
+            for item in batches
+        ],
+        "existing_article": _clip_text(article_inputs.get("existing_article", ""), _env_int("ARTICLEREADY_REVISION_PLAN_MAX_CHARS", 120000, minimum=20000, maximum=180000)),
+        "source_record_titles": [
+            {"key": item.get("key"), "title": item.get("title"), "year": item.get("year"), "relevance_tier": item.get("relevance_tier")}
+            for item in source_records[:24]
+        ],
+        "rules": [
+            "Identify the exact article-level problem, gap and contribution that need clarification.",
+            "Identify method, analysis, validity, robustness, discussion and recommendation issues only where relevant to the supplied design.",
+            "Separate corrections that can be made from the existing evidence from actions requiring author-supplied data or analysis.",
+            "Do not invent evidence, citations, analyses, results or screening counts.",
+            "Return a concise Markdown plan organised by manuscript section.",
+        ],
+    }
+    try:
+        plan, model_used, notes = _call_openai_response_with_fallback(
+            client,
+            primary_model=_revision_plan_model(),
+            instructions="Act as a senior journal editor. Produce a concise evidence-grounded revision plan only.",
+            input_payload=json.dumps(plan_prompt, ensure_ascii=False, indent=2),
+            max_output_tokens=_env_int("ARTICLEREADY_REVISION_PLAN_MAX_OUTPUT_TOKENS", 4500, minimum=1200, maximum=8000),
+            reasoning_effort=os.getenv("OPENAI_ARTICLE_FAST_REASONING", "high"),
+            recovery_reasoning_effort="high",
+            fallback_reasoning_effort="high",
+            request_timeout_seconds=min(_revision_timeout_seconds(), 420),
+            include_configured_fallbacks=False,
+            purpose="revision_plan",
+        )
+        provider_errors.extend(notes)
+        return _strip_code_fences(plan) or fallback_plan, model_used
+    except Exception as exc:
+        provider_errors.append(f"Revision plan model unavailable; deterministic plan used: {str(exc)[:180]}")
+        return fallback_plan, "deterministic"
+
+
+def _section_output_tokens(word_count: int) -> int:
+    hard_cap = _env_int("ARTICLEREADY_REVISION_SECTION_MAX_OUTPUT_TOKENS", 14000, minimum=4000, maximum=30000)
+    return max(2600, min(hard_cap, int(max(500, word_count) * 2.25 + 900)))
+
+
+def _section_revision_is_usable(original: str, revised: str) -> tuple[bool, str]:
+    original_clean = re.sub(r"\s+", " ", str(original or "")).strip()
+    revised_clean = re.sub(r"\s+", " ", str(revised or "")).strip()
+    if not revised_clean:
+        return False, "empty section response"
+    if len(revised_clean) < max(1, int(len(original_clean) * 0.50)):
+        return False, "section response was substantially truncated"
+    return True, ""
+
+
+def _revise_section_batch(
+    client: Any,
+    *,
+    payload: dict[str, Any],
+    article_inputs: dict[str, Any],
+    revision_plan: str,
+    batch: dict[str, Any],
+    batch_number: int,
+    total_batches: int,
+    source_records: list[dict[str, Any]],
+) -> tuple[str, str, list[str]]:
+    original = str(batch.get("text") or "").strip()
+    label = str(batch.get("label") or f"Manuscript part {batch_number}")
+    if bool(batch.get("protected")):
+        return original, "preserved", []
+
+    prompt = {
+        "task": "Substantively revise one section of an existing journal article. Return only the revised section.",
+        "article_profile": {key: value for key, value in article_inputs.items() if key != "existing_article"},
+        "revision_focus": _revision_focus(payload),
+        "revision_plan": revision_plan,
+        "batch": {
+            "number": batch_number,
+            "total": total_batches,
+            "section_label": label,
+            "continuation_of_same_section": bool(batch.get("continuation")),
+            "original_word_count": int(batch.get("word_count") or _word_count(original)),
+        },
+        "scholarly_source_records": _source_records_for_section(label, source_records),
+        "citation_density_requirements": _citation_density_requirements(payload),
+        "human_like_writing_layer": _revision_human_writing_layer(payload),
+        "original_section": original,
+        "rules": [
+            "Revise the supplied section rather than replacing the study with a generic article.",
+            "Preserve every confirmed fact, sample detail, date, coefficient, p-value, quotation, table value, citation and reference unless the supplied evidence establishes that it is wrong.",
+            "Do not invent results, analyses, participant details, ethics approvals, permissions, citations, references, tables, figures or review counts.",
+            "Where a necessary analysis or fact is missing, use one concise [Author action: ...] marker at the exact point of need.",
+            "Strengthen conceptual logic, method fit, interpretation, contribution and publication focus only as relevant to this section.",
+            "Use source records only where the title or abstract directly supports the claim. Never infer detailed findings from metadata alone.",
+            "Preserve existing valid citations and place any verified added citation directly beside the claim it supports.",
+            "Use polished formal British English, varied sentence rhythm and natural transitions without artificial errors or commentary about humanisation.",
+            "Keep the section close to its original length unless clarity requires modest expansion or compression.",
+            "Preserve the exact section heading. When continuation_of_same_section is true, do not repeat the heading.",
+            "Return only the revised section in Markdown. Do not provide a report, preface, explanation or code fence.",
+        ],
+    }
+    raw, model_used, notes = _call_openai_response_with_fallback(
+        client,
+        primary_model=_revision_model(),
+        fallback_model=_revision_escalation_model(),
+        instructions=(
+            "You are ArticleReady AI's senior journal revision editor. Produce a rigorous, evidence-preserving revision of only the supplied manuscript section. "
+            "Never invent analysis or results. Return the section only."
+        ),
+        input_payload=json.dumps(prompt, ensure_ascii=False, indent=2),
+        max_output_tokens=_section_output_tokens(int(batch.get("word_count") or _word_count(original))),
+        reasoning_effort=_revision_reasoning(),
+        recovery_reasoning_effort=_revision_recovery_reasoning(),
+        fallback_reasoning_effort=os.getenv("OPENAI_ARTICLE_ESCALATION_REASONING", "high"),
+        request_timeout_seconds=_revision_timeout_seconds(),
+        include_configured_fallbacks=False,
+        purpose=f"revision_section_{batch_number}_of_{total_batches}",
+    )
+    revised = _strip_code_fences(raw)
+    if "===REVISED_ARTICLE===" in revised:
+        revised = revised.split("===REVISED_ARTICLE===", 1)[1].strip()
+    usable, reason = _section_revision_is_usable(original, revised)
+    if not usable:
+        raise RuntimeError(f"{label}: {reason}")
+    return revised, model_used, notes
+
+
+def _fallback_completed_revision_report(
+    *,
+    revision_plan: str,
+    batch_audit: list[dict[str, Any]],
+    provider_errors: list[Any],
+) -> str:
+    changed = sum(1 for item in batch_audit if item.get("changed"))
+    preserved = sum(1 for item in batch_audit if item.get("model") == "preserved")
+    warnings = [str(item) for item in provider_errors[-6:] if item]
+    warning_text = "\n".join(f"- {item[:220]}" for item in warnings) or "- No material provider warning was recorded."
+    return f"""# Revision and Publishability Report
+
+## Revision status
+
+A substantive manuscript revision was completed across {len(batch_audit)} section batch(es). {changed} batch(es) changed materially, while {preserved} protected reference batch(es) were retained unchanged to avoid altering unverified bibliographic details. This report does not guarantee journal acceptance.
+
+## Revision plan applied
+
+{revision_plan}
+
+## Additional analysis
+
+Any analysis not supported by supplied output remains identified in the revised manuscript as an [Author action: ...] item. No suggested analysis is reported as completed.
+
+## Provider and processing notes
+
+{warning_text}
+
+## Remaining author checks
+
+- Verify every citation and reference against the final publisher record.
+- Confirm all red author-action items before submission.
+- Check the revised manuscript against the target journal's latest author instructions and word limit.
+""".strip()
+
+
+def _generate_revision_report(
+    client: Any,
+    *,
+    payload: dict[str, Any],
+    article_inputs: dict[str, Any],
+    revision_plan: str,
+    revised_article: str,
+    batch_audit: list[dict[str, Any]],
+    provider_errors: list[Any],
+) -> tuple[str, str]:
+    report_prompt = {
+        "task": "Prepare the Revision and Publishability Report for a substantively revised journal article.",
+        "article_profile": {key: value for key, value in article_inputs.items() if key != "existing_article"},
+        "revision_plan": revision_plan,
+        "batch_audit": batch_audit,
+        "revised_article": _clip_text(revised_article, _env_int("ARTICLEREADY_REVISION_REPORT_ARTICLE_CHARS", 110000, minimum=20000, maximum=170000)),
+        "requirements": [
+            "Begin with an overall publication-readiness assessment without guaranteeing acceptance.",
+            "List the most important revisions by section.",
+            "Evaluate conceptualisation, theoretical positioning and contribution.",
+            "Evaluate method fit, reporting completeness and whether the analysis supports the claims.",
+            "Classify additional analyses as Essential, Strongly recommended or Optional. For each, state rationale, required data, suitable method, output to report and consequence of omission.",
+            "Evaluate Results-Discussion alignment, implications, limitations and recommendations.",
+            "Identify remaining author actions and reference-verification needs.",
+            "Do not claim that an unperformed analysis was completed.",
+            "Return the report only in Markdown without code fences.",
+        ],
+    }
+    try:
+        report, model_used, notes = _call_openai_response_with_fallback(
+            client,
+            primary_model=_revision_model(),
+            instructions="Write a precise, evidence-grounded journal revision report. Do not invent completed work.",
+            input_payload=json.dumps(report_prompt, ensure_ascii=False, indent=2),
+            max_output_tokens=_env_int("ARTICLEREADY_REVISION_REPORT_MAX_OUTPUT_TOKENS", 7000, minimum=2000, maximum=12000),
+            reasoning_effort=os.getenv("OPENAI_ARTICLE_REVISION_REPORT_REASONING", "high"),
+            recovery_reasoning_effort="high",
+            fallback_reasoning_effort="high",
+            request_timeout_seconds=_revision_timeout_seconds(),
+            include_configured_fallbacks=False,
+            purpose="revision_report",
+        )
+        provider_errors.extend(notes)
+        return _strip_code_fences(report), model_used
+    except Exception as exc:
+        provider_errors.append(f"Revision report model unavailable; truthful local report used: {str(exc)[:180]}")
+        return _fallback_completed_revision_report(
+            revision_plan=revision_plan,
+            batch_audit=batch_audit,
+            provider_errors=provider_errors,
+        ), "deterministic"
+
+
+def _completed_reviewer_matrix(review_comments: str) -> str:
+    comments = [line.strip(" -\t") for line in str(review_comments or "").splitlines() if line.strip()]
+    if not comments:
+        return ""
+    rows = ["| Reviewer comment | Revision made | Location | Remaining action |", "|---|---|---|---|"]
+    for comment in comments[:40]:
+        safe = comment.replace("|", "/")
+        rows.append(f"| {safe} | Addressed where supported by the supplied manuscript and evidence. | Verify in the revised manuscript and report. | Confirm that the response fully satisfies the reviewer before submission. |")
+    return "\n".join(rows)
+
+
+def _generate_reviewer_matrix(
+    client: Any,
+    *,
+    payload: dict[str, Any],
+    revision_plan: str,
+    revision_report: str,
+    batch_audit: list[dict[str, Any]],
+    provider_errors: list[Any],
+) -> tuple[str, str]:
+    comments = str(payload.get("review_comments") or "").strip()
+    if not comments or not bool(payload.get("include_reviewer_response_matrix", True)):
+        return "", "none"
+    matrix_prompt = {
+        "task": "Prepare a reviewer-response matrix grounded in the completed revision.",
+        "reviewer_comments": comments,
+        "revision_plan": revision_plan,
+        "revision_report": revision_report,
+        "section_audit": batch_audit,
+        "rules": [
+            "Create a Markdown table with columns Reviewer comment, Revision made, Location and Remaining action.",
+            "Do not claim that missing evidence or unperformed analysis was supplied.",
+            "Where the revision could not fully resolve a comment, state the exact remaining author action.",
+            "Return the table only without code fences.",
+        ],
+    }
+    try:
+        matrix, model_used, notes = _call_openai_response_with_fallback(
+            client,
+            primary_model=_revision_plan_model(),
+            instructions="Prepare a concise, accurate reviewer-response matrix from the completed revision evidence.",
+            input_payload=json.dumps(matrix_prompt, ensure_ascii=False, indent=2),
+            max_output_tokens=_env_int("ARTICLEREADY_REVIEWER_MATRIX_MAX_OUTPUT_TOKENS", 4500, minimum=1200, maximum=8000),
+            reasoning_effort=os.getenv("OPENAI_ARTICLE_FAST_REASONING", "high"),
+            recovery_reasoning_effort="high",
+            fallback_reasoning_effort="high",
+            request_timeout_seconds=min(_revision_timeout_seconds(), 420),
+            include_configured_fallbacks=False,
+            purpose="reviewer_response_matrix",
+        )
+        provider_errors.extend(notes)
+        return _strip_code_fences(matrix), model_used
+    except Exception as exc:
+        provider_errors.append(f"Reviewer-response model unavailable; verification matrix used: {str(exc)[:180]}")
+        return _completed_reviewer_matrix(comments), "deterministic"
 
 def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
     article_text = _finalise_article_text(str(payload.get("article_text") or ""))
@@ -233,11 +775,14 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
     payload["variables_constructs"] = str(payload.get("research_area") or "")
 
     sources, blocked, search_result = _search_sources(payload)
-    source_records = _source_context(sources)[:80]
-    provider_errors = list(search_result.get("provider_errors") or [])
-    model = _revision_model()
-    client = _safe_get_openai_client()
+    source_limit = _env_int("ARTICLEREADY_REVISION_MAX_SOURCE_CONTEXT", 60, minimum=10, maximum=100)
+    source_records = _source_context(sources)[:source_limit]
+    provider_errors: list[Any] = list(search_result.get("provider_errors") or [])
+    client = _safe_get_openai_client(_revision_timeout_seconds())
     model_used = "none"
+    revision_models_used: list[str] = []
+    batch_audit: list[dict[str, Any]] = []
+    revision_plan = ""
 
     if not client or os.getenv("ARTICLEREADY_REVISION_USE_AI", "1").strip().lower() in {"0", "false", "no"}:
         provider_errors.append(
@@ -249,8 +794,8 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
         revision_report = _fallback_revision_report(payload, source_records, provider_errors)
         reviewer_matrix = _fallback_reviewer_matrix(str(payload.get("review_comments") or ""))
         mode = "metadata_fallback"
+        batches: list[dict[str, Any]] = []
     else:
-        current_year = datetime.now().year
         article_inputs = {
             "article_title": str(payload.get("article_title") or "").strip(),
             "article_type": str(payload.get("article_type") or "Empirical research article").strip(),
@@ -269,106 +814,90 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
             "reviewer_comments": str(payload.get("review_comments") or "").strip(),
             "existing_article": article_text,
         }
-        prompt = {
-            "task": "Substantively revise and polish an existing journal article into a stronger, publication-focused manuscript, then provide a transparent publishability report.",
-            "current_year": current_year,
-            "article_inputs": article_inputs,
-            "revision_focus": _revision_focus(payload),
-            "human_like_writing_layer": _revision_human_writing_layer(payload),
-            "scholarly_source_records": source_records,
-            "reference_depth_guidance": _article_reference_expectations(str(payload.get("article_type") or "")),
-            "citation_density_requirements": _citation_density_requirements(payload),
-            "strict_revision_rules": [
-                "Preserve all confirmed facts, sample details, coefficients, p-values, quotations, table values, dates and study results unless the user supplied evidence that they are wrong.",
-                "Do not invent, estimate or silently alter results, data, respondent details, ethics approvals, permissions, citations, references, tables or figures.",
-                "Do not report a suggested analysis as though it has been conducted. Insert a concise bracketed action marker in the manuscript only where the missing analysis prevents a defensible claim.",
-                "Use the supplied article as the evidential base. Improve coherence, argument, section alignment, academic expression and publication focus without changing the study into a different project.",
-                "Strengthen conceptualisation by clarifying the phenomenon, theoretical lens, construct definitions, expected relationships, mechanisms and boundary conditions where the evidence supports them.",
-                "State the contribution precisely. Distinguish theoretical, empirical, methodological, contextual and practical contributions, and remove unsupported novelty claims.",
-                "Assess whether the design and methods fit the questions, objectives and claims. Check sampling, measurement, construct validity, identification, endogeneity, common method bias, trustworthiness, reproducibility and ethics only where relevant.",
-                "Assess analysis appropriateness and reporting. Consider diagnostics, robustness, sensitivity, alternative specifications, mediation, moderation, heterogeneity, endogeneity correction, predictive checks, qualitative saturation or triangulation only when suitable for the design.",
-                "Build the Discussion around the confirmed findings. Explain mechanisms and context, compare with relevant literature, acknowledge conflicting evidence, state boundary conditions and avoid causal language when the design supports only association.",
-                "Recommendations must follow directly from confirmed findings, identify responsible actors, recognise implementation constraints and avoid generic statements.",
-                "Use target-journal scope and author guidance when supplied. Respect the stated word limit and citation style.",
-                "Apply a strict relevance gate to scholarly records. Use only records that directly support the article. Never invent bibliographic details or cite a metadata record as evidence for a finding not visible in its title or abstract.",
-                "Retain existing valid citations. Do not remove a citation merely because its full record was not supplied, but flag obviously incomplete or unverifiable references in the report.",
-                "Audit citation coverage section by section. Place verified citations directly beside factual, theoretical, methodological and comparative claims, using the supplied citation-density requirements without padding or fabricating references.",
-                "When the evidence bank cannot support an under-cited claim, insert [Author action: Add a verified source that directly supports this claim.] rather than inventing a citation.",
-                "Address every reviewer comment where possible. When a comment cannot be resolved from supplied evidence, state the precise action or analysis needed rather than pretending it was completed.",
-                "Apply the human_like_writing_layer and its strong_humanisation_requirements throughout the revised manuscript, including prose, objectives, methods, equations, frameworks and references where relevant.",
-                "Use controlled high burstiness, strong but meaning-preserving lexical variation, varied paragraph openings and natural transitions.",
-                "Write in polished formal British English with natural academic rhythm. Vary sentence and paragraph length according to the argument rather than using a uniform template.",
-                "Build substantive paragraphs around claim, evidence, interpretation, qualification and contribution where appropriate. Avoid mechanical author-by-author summaries.",
-                "Preserve the author's disciplinary voice and valid citations while removing template-like filler, inflated claims, repetitive transitions and generic wording.",
-                "Do not add artificial errors or any commentary about AI detection, humanisation or detector evasion.",
-            ],
-            "revision_report_requirements": [
-                "Begin with an overall publication-readiness assessment that does not guarantee acceptance.",
-                "List the most important revisions made by section.",
-                "Evaluate conceptualisation and theoretical positioning.",
-                "Evaluate the clarity and defensibility of the contribution.",
-                "Evaluate method fit and reporting completeness.",
-                "Evaluate whether the analysis is adequate for the claims.",
-                "List additional analyses under Essential, Strongly recommended and Optional. For each, give the rationale, data required, suitable method, output to report and consequence of omission.",
-                "Evaluate the Results-Discussion alignment, implications, limitations and recommendations.",
-                "Identify remaining author actions, missing evidence and reference-verification needs.",
-                "Do not state that the article is publishable merely because the prose has been revised.",
-            ],
-            "output_format": [
-                "Return plain Markdown and use the exact markers below.",
-                "Start with ===REVISED_ARTICLE=== followed by the complete revised article.",
-                "Then add ===REVISION_REPORT=== followed by the Revision and Publishability Report.",
-                "When reviewer comments were supplied and include_reviewer_response_matrix is true, add ===REVIEWER_RESPONSE_MATRIX=== followed by a Markdown table with columns Reviewer comment, Revision made, Location and Remaining action.",
-                "Do not wrap the response in code fences.",
-            ],
-            "include_reviewer_response_matrix": bool(payload.get("include_reviewer_response_matrix", True)),
-        }
+        candidate_batches = _split_revision_batches(article_text)
+        batching_threshold = _env_int("ARTICLEREADY_REVISION_BATCH_THRESHOLD_WORDS", 4500, minimum=1800, maximum=12000)
+        batching_applied = _word_count(article_text) >= batching_threshold
+        batches = candidate_batches if batching_applied else [{
+            "index": 1,
+            "heading": "Complete manuscript",
+            "label": "Complete manuscript",
+            "text": article_text,
+            "protected": False,
+            "continuation": False,
+            "word_count": _word_count(article_text),
+        }]
+
+        revision_plan, plan_model = _build_revision_plan(
+            client,
+            payload=payload,
+            article_inputs=article_inputs,
+            source_records=source_records,
+            batches=batches,
+            provider_errors=provider_errors,
+        )
+        if plan_model not in {"none", "deterministic"}:
+            revision_models_used.append(plan_model)
+
+        revised_parts: list[str] = []
         try:
-            raw, model_used, attempt_notes = _call_openai_response_with_fallback(
-                client,
-                primary_model=model,
-                fallback_model=os.getenv("OPENAI_ARTICLE_STANDARD_MODEL") or os.getenv("OPENAI_ARTICLE_TERRA_MODEL") or "gpt-5-mini",
-                instructions=(
-                    "You are ArticleReady AI's senior journal article revision editor. Revise rigorously but preserve the study's confirmed evidence, "
-                    "valid citations and substantive authorial voice. Apply the supplied strong human-supervised academic writing layer to produce natural, "
-                    "publication-focused scholarly prose with controlled high burstiness, varied paragraph openings, precise lexical choices, "
-                    "careful transitions and paragraph-level reasoning. "
-                    "Never invent analysis or results. Do not add artificial errors or mention AI detection or humanisation. "
-                    "Clearly separate manuscript revision from recommendations for further analysis."
-                ),
-                input_payload=json.dumps(prompt, ensure_ascii=False, indent=2),
-                max_output_tokens=int(os.getenv("ARTICLEREADY_REVISION_MAX_OUTPUT_TOKENS", "32000") or 32000),
-            )
-            provider_errors.extend(attempt_notes)
-            revised_article, revision_report, reviewer_matrix = _split_revision_package(raw)
-            if not _revision_changed(article_text, revised_article):
-                raise RuntimeError("The model returned no substantive revised manuscript.")
-            if not revision_report:
-                report_prompt = {
-                    "task": "Prepare only the Revision and Publishability Report for the supplied original and revised article.",
-                    "article_title": article_inputs["article_title"],
-                    "article_type": article_inputs["article_type"],
-                    "original_article": article_text,
-                    "revised_article": revised_article,
-                    "reviewer_comments": article_inputs["reviewer_comments"],
-                    "requirements": prompt["revision_report_requirements"],
-                    "output": "Return the report only, in Markdown, without code fences.",
-                }
-                recovered_report, recovered_model, report_notes = _call_openai_response_with_fallback(
+            for index, batch in enumerate(batches, start=1):
+                revised_part, used_model, notes = _revise_section_batch(
                     client,
-                    primary_model=model_used or model,
-                    fallback_model=os.getenv("OPENAI_ARTICLE_STANDARD_MODEL") or os.getenv("OPENAI_ARTICLE_TERRA_MODEL") or "gpt-5-mini",
-                    instructions="Write a precise, evidence-grounded journal revision report. Do not claim that unperformed analysis was completed.",
-                    input_payload=json.dumps(report_prompt, ensure_ascii=False, indent=2),
-                    max_output_tokens=int(os.getenv("ARTICLEREADY_REVISION_REPORT_MAX_OUTPUT_TOKENS", "7000") or 7000),
+                    payload=payload,
+                    article_inputs=article_inputs,
+                    revision_plan=revision_plan,
+                    batch=batch,
+                    batch_number=index,
+                    total_batches=len(batches),
+                    source_records=source_records,
                 )
-                revision_report = recovered_report
-                model_used = recovered_model or model_used
-                provider_errors.extend(report_notes)
-            if payload.get("review_comments") and payload.get("include_reviewer_response_matrix", True) and not reviewer_matrix:
-                reviewer_matrix = _fallback_reviewer_matrix(str(payload.get("review_comments") or ""))
+                provider_errors.extend(notes)
+                if used_model not in {"none", "preserved", "deterministic"} and used_model not in revision_models_used:
+                    revision_models_used.append(used_model)
+                original_part = str(batch.get("text") or "").strip()
+                revised_parts.append(revised_part.strip())
+                batch_audit.append({
+                    "batch": index,
+                    "section": batch.get("label"),
+                    "continuation": bool(batch.get("continuation")),
+                    "original_words": _word_count(original_part),
+                    "revised_words": _word_count(revised_part),
+                    "changed": re.sub(r"\s+", " ", original_part).strip() != re.sub(r"\s+", " ", revised_part).strip(),
+                    "model": used_model,
+                })
+            revised_article = "\n\n".join(part for part in revised_parts if part).strip()
+            if not _revision_changed(article_text, revised_article):
+                raise RuntimeError("The completed section pipeline did not produce a substantive full-manuscript revision.")
+
+            revision_report, report_model = _generate_revision_report(
+                client,
+                payload=payload,
+                article_inputs=article_inputs,
+                revision_plan=revision_plan,
+                revised_article=revised_article,
+                batch_audit=batch_audit,
+                provider_errors=provider_errors,
+            )
+            if report_model not in {"none", "deterministic"} and report_model not in revision_models_used:
+                revision_models_used.append(report_model)
+
+            reviewer_matrix, matrix_model = _generate_reviewer_matrix(
+                client,
+                payload=payload,
+                revision_plan=revision_plan,
+                revision_report=revision_report,
+                batch_audit=batch_audit,
+                provider_errors=provider_errors,
+            )
+            if matrix_model not in {"none", "deterministic"} and matrix_model not in revision_models_used:
+                revision_models_used.append(matrix_model)
             mode = "ai_revision"
+            model_used = ", ".join(revision_models_used) or _revision_model()
         except Exception as exc:
+            LOGGER.exception(
+                "Article revision pipeline failed model=%s batches=%s article_chars=%s",
+                _revision_model(), len(batches), len(article_text),
+            )
             provider_errors.append(f"OpenAI article revision failed: {str(exc)[:220]}")
             if not _allow_non_substantive_fallback():
                 raise _public_revision_failure(provider_errors) from exc
@@ -376,17 +905,29 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
             revision_report = _fallback_revision_report(payload, source_records, provider_errors)
             reviewer_matrix = _fallback_reviewer_matrix(str(payload.get("review_comments") or ""))
             mode = "metadata_fallback_after_ai_error"
+            batching_applied = False
 
     revised_article = _finalise_article_text(revised_article)
     humanizer_report: dict[str, Any] = {"mode": _humanizer_mode(payload), "applied": False}
     humanizer_models: list[str] = []
     if mode == "ai_revision":
-        revised_article, humanizer_report, humanizer_models = _humanize_article_with_model(
-            client,
-            revised_article,
-            payload=payload,
-            provider_errors=provider_errors,
-        )
+        use_second_model_pass = str(
+            os.getenv("ARTICLEREADY_REVISION_SECOND_HUMANIZER_MODEL_PASS", "0") or "0"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        if use_second_model_pass:
+            revised_article, humanizer_report, humanizer_models = _humanize_article_with_model(
+                client,
+                revised_article,
+                payload=payload,
+                provider_errors=provider_errors,
+            )
+        else:
+            revised_article, humanizer_report = humanize_scholarly_text(
+                revised_article,
+                mode=_humanizer_mode(payload),
+            )
+            humanizer_report["model_pass_applied"] = False
+            humanizer_report["revision_section_prompts_applied_humanizer_rules"] = True
         revised_article = _finalise_article_text(revised_article)
     revision_report = _finalise_article_text(revision_report)
     reviewer_matrix = _finalise_article_text(reviewer_matrix) if reviewer_matrix else ""
@@ -400,8 +941,14 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
         "revised_article_text": revised_article,
         "revision_report": revision_report,
         "reviewer_response_matrix": reviewer_matrix,
+        "revision_plan": revision_plan,
         "model_used": model_used if client else "none",
+        "revision_models_used": revision_models_used,
+        "reasoning_effort": _revision_reasoning() if client else "none",
         "mode": mode,
+        "revision_batching_applied": bool(mode == "ai_revision" and batching_applied),
+        "revision_batch_count": len(batch_audit),
+        "revision_batch_audit": batch_audit,
         "source_records_used": source_records,
         "source_bank_count": len(source_records),
         "excluded_retracted_count": len(blocked),
@@ -414,16 +961,17 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
         "humanizer_models_used": humanizer_models,
         "citation_density_report": citation_density,
         "quality_filters": [
+            "Long manuscripts are revised section by section to reduce truncation and timeout risk.",
+            "GPT-5.6 Terra performs substantive revision with xhigh reasoning, Terra high provides a lower-cost recovery pass, and Sol is reserved for exceptional escalation.",
+            "GPT-5.6 Luna prepares the compact revision plan and reviewer-response support where enabled.",
             "The same strong human-supervised academic writing layer used by the Article Writer is applied to article revision.",
-            "The post-processing pass is deterministic and protects confirmed evidence, citations, tables, equations, placeholders and references.",
+            "The post-processing pass protects confirmed evidence, citations, tables, equations, placeholders and references.",
             "Confirmed results and numerical evidence are preserved unless the author supplies a correction.",
             "Suggested additional analyses are not presented as completed analyses.",
-            "Reviewer comments are addressed through a transparent response matrix when supplied.",
             "Scholarly records are subject to a relevance gate and retraction screening.",
             "The revision report does not guarantee journal acceptance.",
         ],
     }
-
 
 def _plain_compare_text(text: str) -> str:
     text = re.sub(r"^#{1,6}\s+", "", str(text or "").strip())

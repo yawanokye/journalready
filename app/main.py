@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from app.article_service import validate_gpt56_configuration
 from app.developer_access import router as developer_access_router
 from app.payments.api import api_router as payments_router
 from app.payments.store import init_payment_tables
@@ -29,6 +30,7 @@ STATIC_DIR = BASE_DIR / "static"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    validate_gpt56_configuration()
     init_payment_tables()
     init_review_workspace_tables()
     if env_bool("ARTICLEREADY_DEVELOPER_ACCESS_ENABLED", False) and not os.getenv(
@@ -44,7 +46,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="ArticleReady AI",
     description="Journal article ideation, auditable review-evidence management, staged drafting, research-resource guidance, instrument planning, polishing and revision assistant.",
-    version="2.1.0",
+    version="2.2.0",
     docs_url="/docs" if env_bool("ARTICLEREADY_ENABLE_API_DOCS", False) else None,
     redoc_url="/redoc" if env_bool("ARTICLEREADY_ENABLE_API_DOCS", False) else None,
     openapi_url="/openapi.json" if env_bool("ARTICLEREADY_ENABLE_API_DOCS", False) else None,

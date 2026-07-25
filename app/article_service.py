@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import os
 import random
 import re
@@ -49,6 +50,11 @@ _ACTION_LABEL_RE = re.compile(
 
 _ACTION_RED = (192, 0, 0)
 
+LOGGER = logging.getLogger("articleready.openai")
+
+_ALLOWED_GPT56_MODELS = {"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"}
+_REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
+
 _ADAM_2020_REFERENCE = (
     "Adam, A. M. (2020). Sample size determination in survey research. "
     "Journal of Scientific Research and Reports, 26(5), 90-97. "
@@ -56,41 +62,111 @@ _ADAM_2020_REFERENCE = (
 )
 
 
-def _safe_get_openai_client():
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = str(os.getenv(name, "1" if default else "0") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _normalise_reasoning_effort(value: str, fallback: str = "high") -> str:
+    effort = str(value or fallback).strip().lower()
+    if effort in _REASONING_EFFORTS:
+        return effort
+    fallback_effort = str(fallback or "high").strip().lower()
+    return fallback_effort if fallback_effort in _REASONING_EFFORTS else "high"
+
+
+def _safe_get_openai_client(timeout_seconds: float | None = None):
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
         return None
     try:
         from openai import OpenAI
 
-        timeout_seconds = max(30.0, float(os.getenv("OPENAI_ARTICLEREADY_TIMEOUT_SECONDS", "180") or 180))
-        sdk_retries = max(0, min(int(os.getenv("OPENAI_ARTICLEREADY_SDK_RETRIES", "2") or 2), 5))
-        return OpenAI(api_key=api_key, timeout=timeout_seconds, max_retries=sdk_retries)
-    except Exception:
+        configured_timeout = float(
+            timeout_seconds
+            if timeout_seconds is not None
+            else os.getenv("OPENAI_ARTICLEREADY_TIMEOUT_SECONDS", "600") or 600
+        )
+        configured_timeout = max(30.0, min(configured_timeout, 1800.0))
+        sdk_retries = max(0, min(int(os.getenv("OPENAI_ARTICLEREADY_SDK_RETRIES", "1") or 1), 3))
+        return OpenAI(api_key=api_key, timeout=configured_timeout, max_retries=sdk_retries)
+    except Exception as exc:
+        LOGGER.warning("OpenAI client could not be initialised: %s", type(exc).__name__)
         return None
 
 
 def _normalise_gpt56_model(value: str, fallback: str) -> str:
-    """Return a safe configured OpenAI model ID.
+    """Return a GPT-5.6 model ID, unless an explicit compatibility override is enabled."""
+    allow_other = _env_bool("ARTICLEREADY_ALLOW_NON_GPT56_MODELS", False)
 
-    The historical function name is retained for compatibility with older
-    ArticleReady modules, but model IDs are no longer restricted to invented or
-    account-specific labels. Runtime environment values are accepted when they
-    contain only ordinary model-ID characters.
-    """
-    model = str(value or "").strip()
-    if model and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{1,127}", model):
-        return model
-    return str(fallback or "gpt-5.1").strip()
+    def clean(raw: str) -> str:
+        model = str(raw or "").strip()
+        if not model or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{1,127}", model):
+            return ""
+        if model in _ALLOWED_GPT56_MODELS or allow_other:
+            return model
+        return ""
+
+    selected = clean(value)
+    if selected:
+        return selected
+    selected_fallback = clean(fallback)
+    if selected_fallback:
+        return selected_fallback
+    return ""
+
+
+def validate_gpt56_configuration() -> dict[str, str]:
+    """Fail fast when stale non-GPT-5.6 production model values remain configured."""
+    if _env_bool("ARTICLEREADY_ALLOW_NON_GPT56_MODELS", False):
+        return {"compatibility_override": "enabled"}
+
+    single_value_vars = [
+        "OPENAI_ARTICLE_STANDARD_MODEL",
+        "OPENAI_ARTICLE_ADVANCED_MODEL",
+        "OPENAI_ARTICLE_REVISION_MODEL",
+        "OPENAI_ARTICLE_HUMANIZER_MODEL",
+        "OPENAI_ARTICLE_FAST_MODEL",
+        "OPENAI_ARTICLE_REVISION_PLAN_MODEL",
+        "OPENAI_ARTICLE_ESCALATION_MODEL",
+        "OPENAI_ARTICLE_FALLBACK_MODEL",
+        "OPENAI_ARTICLE_TERRA_MODEL",
+        "OPENAI_ARTICLE_SOL_MODEL",
+        "OPENAI_ARTICLE_LUNA_MODEL",
+    ]
+    invalid: list[str] = []
+    configured: dict[str, str] = {}
+    for name in single_value_vars:
+        value = str(os.getenv(name, "") or "").strip()
+        if not value:
+            continue
+        configured[name] = value
+        if value not in _ALLOWED_GPT56_MODELS:
+            invalid.append(f"{name}={value}")
+
+    fallback_values = [
+        item.strip()
+        for item in str(os.getenv("OPENAI_ARTICLE_FALLBACK_MODELS", "") or "").split(",")
+        if item.strip()
+    ]
+    if fallback_values:
+        configured["OPENAI_ARTICLE_FALLBACK_MODELS"] = ",".join(fallback_values)
+        invalid.extend(
+            f"OPENAI_ARTICLE_FALLBACK_MODELS contains {item}"
+            for item in fallback_values
+            if item not in _ALLOWED_GPT56_MODELS
+        )
+
+    if invalid:
+        raise RuntimeError(
+            "ArticleReady is restricted to the GPT-5.6 family. Remove or replace stale model settings: "
+            + "; ".join(invalid)
+        )
+    return configured
 
 
 def _select_article_model(level: str, article_type: str = "", payload: dict[str, Any] | None = None) -> str:
-    """Choose the configured standard or advanced ArticleReady model.
-
-    Legacy Terra/Sol environment names remain supported, but the application no
-    longer assumes those labels are valid API model IDs. Operators can use any
-    model available to their OpenAI project.
-    """
+    """Route substantive ArticleReady drafting to Terra by default for cost control."""
     payload = payload or {}
     level_l = (level or "").strip().lower()
     type_l = (article_type or "").strip().lower()
@@ -113,46 +189,45 @@ def _select_article_model(level: str, article_type: str = "", payload: dict[str,
         or os.getenv("OPENAI_ARTICLE_MASTERS_MODEL")
         or os.getenv("OPENAI_ARTICLE_BACHELOR_MODEL")
         or "",
-        "gpt-5-mini",
+        "gpt-5.6-terra",
     )
     advanced_model = _normalise_gpt56_model(
         os.getenv("OPENAI_ARTICLE_ADVANCED_MODEL")
-        or os.getenv("OPENAI_ARTICLE_SOL_MODEL")
+        or os.getenv("OPENAI_ARTICLE_TERRA_MODEL")
         or os.getenv("OPENAI_ARTICLE_DOCTORAL_MODEL")
         or os.getenv("OPENAI_ARTICLE_RESEARCH_MODEL")
         or "",
-        "gpt-5.1",
+        "gpt-5.6-terra",
     )
 
     if is_doctoral or is_research_masters or is_review_article or is_long or is_completion:
-        return advanced_model
-    return standard_model
+        return advanced_model or "gpt-5.6-terra"
+    return standard_model or "gpt-5.6-terra"
 
 
-def _openai_model_candidates(primary_model: str, *, fallback_model: str = "") -> list[str]:
-    """Return a de-duplicated model chain using configured and safe defaults."""
-    configured = [
-        primary_model,
-        fallback_model,
-        os.getenv("OPENAI_ARTICLE_FALLBACK_MODEL", ""),
-        os.getenv("OPENAI_ARTICLE_ADVANCED_MODEL", ""),
-        os.getenv("OPENAI_ARTICLE_SOL_MODEL", ""),
-        os.getenv("OPENAI_ARTICLE_STANDARD_MODEL", ""),
-        os.getenv("OPENAI_ARTICLE_TERRA_MODEL", ""),
-    ]
-    configured.extend(
-        item.strip()
-        for item in os.getenv("OPENAI_ARTICLE_FALLBACK_MODELS", "gpt-5.1,gpt-5,gpt-5-mini").split(",")
-        if item.strip()
-    )
+def _openai_model_candidates(
+    primary_model: str,
+    *,
+    fallback_model: str = "",
+    include_configured_fallbacks: bool = True,
+) -> list[str]:
+    """Return a de-duplicated GPT-5.6 fallback chain."""
+    configured = [primary_model, fallback_model, os.getenv("OPENAI_ARTICLE_FALLBACK_MODEL", "")]
+    if include_configured_fallbacks:
+        configured.extend(
+            item.strip()
+            for item in os.getenv(
+                "OPENAI_ARTICLE_FALLBACK_MODELS",
+                "gpt-5.6-terra,gpt-5.6-sol",
+            ).split(",")
+            if item.strip()
+        )
     candidates: list[str] = []
     for raw_model in configured:
-        if not str(raw_model or "").strip():
-            continue
-        model = _normalise_gpt56_model(str(raw_model), "")
+        model = _normalise_gpt56_model(str(raw_model or ""), "")
         if model and model not in candidates:
             candidates.append(model)
-    return candidates or ["gpt-5.1", "gpt-5-mini"]
+    return candidates or ["gpt-5.6-terra"]
 
 
 def _provider_status_code(exc: Exception) -> int:
@@ -185,58 +260,102 @@ def _call_openai_response_with_fallback(
     input_payload: Any,
     max_output_tokens: int | None = None,
     fallback_model: str = "",
+    reasoning_effort: str = "high",
+    recovery_reasoning_effort: str = "",
+    fallback_reasoning_effort: str = "high",
+    request_timeout_seconds: float | None = None,
+    include_configured_fallbacks: bool = True,
+    purpose: str = "article_request",
 ) -> tuple[str, str, list[str]]:
-    """Call OpenAI with bounded retries and a model/endpoint fallback chain."""
+    """Call the GPT-5.6 Responses API with bounded, cost-aware recovery."""
     errors: list[str] = []
     last_exc: Exception | None = None
-    attempts_per_model = max(1, min(int(os.getenv("OPENAI_ARTICLEREADY_ATTEMPTS_PER_MODEL", "2") or 2), 4))
+    attempts_per_effort = max(1, min(int(os.getenv("OPENAI_ARTICLEREADY_ATTEMPTS_PER_MODEL", "1") or 1), 2))
     base_delay = max(0.5, float(os.getenv("OPENAI_ARTICLEREADY_RETRY_BASE_SECONDS", "1.5") or 1.5))
-    candidates = _openai_model_candidates(primary_model, fallback_model=fallback_model)
+    primary = _normalise_gpt56_model(primary_model, "gpt-5.6-terra") or "gpt-5.6-terra"
+    candidates = _openai_model_candidates(
+        primary,
+        fallback_model=fallback_model,
+        include_configured_fallbacks=include_configured_fallbacks,
+    )
+    primary_effort = _normalise_reasoning_effort(reasoning_effort, "high")
+    recovery_effort = _normalise_reasoning_effort(recovery_reasoning_effort, primary_effort)
+    fallback_effort = _normalise_reasoning_effort(fallback_reasoning_effort, "high")
+    timeout_seconds = max(30.0, min(float(request_timeout_seconds or os.getenv("OPENAI_ARTICLEREADY_TIMEOUT_SECONDS", "600") or 600), 1800.0))
+    request_client = client.with_options(timeout=timeout_seconds) if hasattr(client, "with_options") else client
+    input_chars = len(str(input_payload or ""))
 
     for model in candidates:
-        for attempt in range(attempts_per_model):
-            kwargs: dict[str, Any] = {
-                "model": model,
-                "instructions": instructions,
-                "input": input_payload,
-                # Article manuscripts may contain unpublished research. Avoid
-                # persistent application-state storage unless an operator
-                # explicitly opts in.
-                "store": False,
-            }
-            if max_output_tokens:
-                kwargs["max_output_tokens"] = int(max_output_tokens)
-            try:
-                response = client.responses.create(**kwargs)
-                text = _extract_text(response)
-                if text:
-                    return text, model, errors
-                errors.append(f"{model} returned no usable text.")
-                break
-            except Exception as exc:  # pragma: no cover - provider behaviour varies
-                last_exc = exc
-                status = _provider_status_code(exc)
-                note = _sanitise_provider_error(exc)
-                transient = status in {408, 409, 425, 429, 500, 502, 503, 504} or any(
-                    token in type(exc).__name__.lower()
-                    for token in ["timeout", "connection", "ratelimit", "internalserver"]
-                )
-                errors.append(f"{model} attempt {attempt + 1}: {note}")
-                if not transient or attempt + 1 >= attempts_per_model:
-                    break
-                retry_after = 0.0
-                response = getattr(exc, "response", None)
-                try:
-                    retry_after = float((getattr(response, "headers", {}) or {}).get("retry-after") or 0)
-                except (TypeError, ValueError):
-                    retry_after = 0.0
-                delay = retry_after or min(15.0, base_delay * (2 ** attempt) + random.uniform(0, 0.75))
-                time.sleep(delay)
+        efforts = [primary_effort]
+        if model == primary and recovery_effort != primary_effort:
+            efforts.append(recovery_effort)
+        elif model != primary:
+            efforts = [fallback_effort]
 
-    # Some project/model combinations may expose Chat Completions while a
-    # Responses call is temporarily unavailable. Use it only as a final recovery
-    # route, preserving the same non-storage setting.
-    if os.getenv("OPENAI_ARTICLEREADY_CHAT_FALLBACK", "1").strip().lower() not in {"0", "false", "no"}:
+        for effort in efforts:
+            for attempt in range(attempts_per_effort):
+                kwargs: dict[str, Any] = {
+                    "model": model,
+                    "instructions": instructions,
+                    "input": input_payload,
+                    "reasoning": {"effort": effort},
+                    "store": False,
+                }
+                if max_output_tokens:
+                    kwargs["max_output_tokens"] = int(max_output_tokens)
+                started = time.monotonic()
+                LOGGER.info(
+                    "OpenAI request started purpose=%s model=%s reasoning=%s input_chars=%s max_output_tokens=%s timeout_seconds=%s attempt=%s",
+                    purpose, model, effort, input_chars, int(max_output_tokens or 0), int(timeout_seconds), attempt + 1,
+                )
+                try:
+                    response = request_client.responses.create(**kwargs)
+                    elapsed = time.monotonic() - started
+                    text = _extract_text(response)
+                    status = str(getattr(response, "status", "completed") or "completed")
+                    response_id = str(getattr(response, "id", "") or "")
+                    if text:
+                        if status != "completed":
+                            errors.append(f"{model} returned text with response status {status}.")
+                        LOGGER.info(
+                            "OpenAI request completed purpose=%s model=%s reasoning=%s response_id=%s status=%s output_chars=%s elapsed_seconds=%.2f",
+                            purpose, model, effort, response_id, status, len(text), elapsed,
+                        )
+                        return text, model, errors
+                    incomplete = getattr(response, "incomplete_details", None)
+                    errors.append(f"{model} returned no usable text; status={status}; incomplete={incomplete!s}.")
+                    LOGGER.warning(
+                        "OpenAI request returned no text purpose=%s model=%s reasoning=%s status=%s elapsed_seconds=%.2f",
+                        purpose, model, effort, status, elapsed,
+                    )
+                    break
+                except Exception as exc:  # pragma: no cover - provider behaviour varies
+                    elapsed = time.monotonic() - started
+                    last_exc = exc
+                    status = _provider_status_code(exc)
+                    note = _sanitise_provider_error(exc)
+                    transient = status in {408, 409, 425, 429, 500, 502, 503, 504} or any(
+                        token in type(exc).__name__.lower()
+                        for token in ["timeout", "connection", "ratelimit", "internalserver"]
+                    )
+                    errors.append(f"{model} {effort} attempt {attempt + 1}: {note}")
+                    LOGGER.warning(
+                        "OpenAI request failed purpose=%s model=%s reasoning=%s status=%s error_type=%s elapsed_seconds=%.2f",
+                        purpose, model, effort, status, type(exc).__name__, elapsed,
+                    )
+                    if not transient or attempt + 1 >= attempts_per_effort:
+                        break
+                    retry_after = 0.0
+                    response = getattr(exc, "response", None)
+                    try:
+                        retry_after = float((getattr(response, "headers", {}) or {}).get("retry-after") or 0)
+                    except (TypeError, ValueError):
+                        retry_after = 0.0
+                    delay = retry_after or min(15.0, base_delay * (2 ** attempt) + random.uniform(0, 0.75))
+                    time.sleep(delay)
+
+    # Disabled by default because GPT-5.6 Responses has been verified for this app.
+    if _env_bool("OPENAI_ARTICLEREADY_CHAT_FALLBACK", False):
         for model in candidates:
             try:
                 chat_kwargs: dict[str, Any] = {
@@ -249,7 +368,7 @@ def _call_openai_response_with_fallback(
                 }
                 if max_output_tokens:
                     chat_kwargs["max_completion_tokens"] = int(max_output_tokens)
-                response = client.chat.completions.create(**chat_kwargs)
+                response = request_client.chat.completions.create(**chat_kwargs)
                 content = response.choices[0].message.content if getattr(response, "choices", None) else ""
                 text = str(content or "").strip()
                 if text:
@@ -260,8 +379,8 @@ def _call_openai_response_with_fallback(
                 errors.append(f"{model} chat fallback: {_sanitise_provider_error(exc)}")
 
     if last_exc:
-        raise RuntimeError("; ".join(errors[-8:])) from last_exc
-    raise RuntimeError("No configured OpenAI model returned usable text.")
+        raise RuntimeError("; ".join(errors[-10:])) from last_exc
+    raise RuntimeError("No configured GPT-5.6 model returned usable text.")
 
 
 def _article_kind(article_type: str) -> str:
@@ -1224,10 +1343,15 @@ def _humanize_article_with_model(
             candidate, used_model, attempt_notes = _call_openai_response_with_fallback(
                 client,
                 primary_model=_humanizer_model(),
-                fallback_model=os.getenv("OPENAI_ARTICLE_SOL_MODEL", "gpt-5.6-sol"),
+                fallback_model="",
                 instructions="Perform an evidence-preserving, high-variation scholarly naturalness edit. Return only the revised section.",
                 input_payload=json.dumps(prompt, ensure_ascii=False, indent=2),
                 max_output_tokens=_humanizer_batch_output_tokens(int(batch.get("word_count") or 0)),
+                reasoning_effort=os.getenv("OPENAI_ARTICLE_HUMANIZER_REASONING", "high"),
+                recovery_reasoning_effort="high",
+                fallback_reasoning_effort="high",
+                include_configured_fallbacks=False,
+                purpose="article_humanizer",
             )
             provider_errors.extend(attempt_notes)
             candidate, _ = humanize_scholarly_text(candidate, mode="balanced") if candidate else (original, {})
@@ -1489,6 +1613,10 @@ def _call_responses_api(
     prompt: dict[str, Any],
     max_output_tokens: int,
     fallback_model: str = "",
+    reasoning_effort: str = "xhigh",
+    recovery_reasoning_effort: str = "high",
+    fallback_reasoning_effort: str = "high",
+    purpose: str = "article_draft",
 ) -> tuple[str, str, list[str]]:
     return _call_openai_response_with_fallback(
         client,
@@ -1497,6 +1625,10 @@ def _call_responses_api(
         instructions=instructions,
         input_payload=json.dumps(prompt, ensure_ascii=False, indent=2),
         max_output_tokens=max_output_tokens,
+        reasoning_effort=reasoning_effort,
+        recovery_reasoning_effort=recovery_reasoning_effort,
+        fallback_reasoning_effort=fallback_reasoning_effort,
+        purpose=purpose,
     )
 
 
@@ -1544,6 +1676,10 @@ def _draft_article_in_batches(
                 instructions=instructions,
                 prompt=section_prompt,
                 max_output_tokens=_max_output_tokens_for_article(section_words, section_batch=True),
+                reasoning_effort=os.getenv("OPENAI_ARTICLE_ADVANCED_REASONING", "xhigh"),
+                recovery_reasoning_effort=os.getenv("OPENAI_ARTICLE_RECOVERY_REASONING", "high"),
+                fallback_reasoning_effort=os.getenv("OPENAI_ARTICLE_ESCALATION_REASONING", "high"),
+                purpose=f"article_batch_section_{index}",
             )
             warnings.extend(attempt_notes)
             if used_model and used_model not in models_used:
@@ -2650,6 +2786,10 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
                     instructions=instructions,
                     prompt=prompt,
                     max_output_tokens=_max_output_tokens_for_article(int(length_plan.get("target_words") or 7000)),
+                    reasoning_effort=os.getenv("OPENAI_ARTICLE_ADVANCED_REASONING", "xhigh"),
+                    recovery_reasoning_effort=os.getenv("OPENAI_ARTICLE_RECOVERY_REASONING", "high"),
+                    fallback_reasoning_effort=os.getenv("OPENAI_ARTICLE_ESCALATION_REASONING", "high"),
+                    purpose="article_single_pass_draft",
                 )
                 provider_errors.extend(attempt_notes)
                 article_text, instrument_text = _split_draft_package(raw_text)
