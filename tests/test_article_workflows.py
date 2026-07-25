@@ -431,15 +431,16 @@ def test_long_article_length_plan_and_token_estimate(monkeypatch):
 def test_configured_standard_and_advanced_model_routing(monkeypatch):
     from app.article_service import _select_article_model
 
-    monkeypatch.setenv('OPENAI_ARTICLE_STANDARD_MODEL', 'gpt-5-mini')
-    monkeypatch.setenv('OPENAI_ARTICLE_ADVANCED_MODEL', 'gpt-5.1')
-    assert _select_article_model('Bachelors', 'Empirical research article', {'target_word_count': 7000}) == 'gpt-5-mini'
-    assert _select_article_model('Research Masters (e.g. MPhil)', 'Empirical research article', {'target_word_count': 7000}) == 'gpt-5.1'
-    assert _select_article_model('Bachelors', 'Systematic review article', {'target_word_count': 7000}) == 'gpt-5.1'
-    assert _select_article_model('Bachelors', 'Empirical research article', {'target_word_count': 11000}) == 'gpt-5.1'
+    monkeypatch.setenv('OPENAI_ARTICLE_STANDARD_MODEL', 'gpt-5.6-terra')
+    monkeypatch.setenv('OPENAI_ARTICLE_ADVANCED_MODEL', 'gpt-5.6-terra')
+    assert _select_article_model('Bachelors', 'Empirical research article', {'target_word_count': 7000}) == 'gpt-5.6-terra'
+    assert _select_article_model('Research Masters (e.g. MPhil)', 'Empirical research article', {'target_word_count': 7000}) == 'gpt-5.6-terra'
+    assert _select_article_model('Bachelors', 'Systematic review article', {'target_word_count': 7000}) == 'gpt-5.6-terra'
+    assert _select_article_model('Bachelors', 'Empirical research article', {'target_word_count': 11000}) == 'gpt-5.6-terra'
 
     monkeypatch.delenv('OPENAI_ARTICLE_STANDARD_MODEL', raising=False)
     monkeypatch.setenv('OPENAI_ARTICLE_BACHELOR_MODEL', 'account-specific-model')
+    monkeypatch.setenv('ARTICLEREADY_ALLOW_NON_GPT56_MODELS', '1')
     assert _select_article_model('Bachelors', 'Empirical research article', {'target_word_count': 7000}) == 'account-specific-model'
 
 

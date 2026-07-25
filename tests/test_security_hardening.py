@@ -43,18 +43,19 @@ def test_openai_call_sets_store_false_and_uses_configured_model(monkeypatch):
             return SimpleNamespace(output_text="revised text")
 
     client = SimpleNamespace(responses=Responses())
-    monkeypatch.setenv("OPENAI_ARTICLE_FALLBACK_MODELS", "gpt-5-mini")
+    monkeypatch.setenv("OPENAI_ARTICLE_FALLBACK_MODELS", "gpt-5.6-sol")
     text, model, notes = _call_openai_response_with_fallback(
         client,
-        primary_model="account-model",
+        primary_model="gpt-5.6-terra",
         instructions="Revise.",
         input_payload=json.dumps({"article": "text"}),
         max_output_tokens=1000,
     )
     assert text == "revised text"
-    assert model == "account-model"
+    assert model == "gpt-5.6-terra"
     assert notes == []
     assert calls[0]["store"] is False
+    assert calls[0]["reasoning"] == {"effort": "high"}
 
 
 def test_semantic_scholar_api_key_is_sent(monkeypatch):
