@@ -145,7 +145,9 @@ form.addEventListener('submit', async (event) => {
     const data = await readApiResponse(response);
     if (response.status === 402 && window.ArticleReadyPayments) { ArticleReadyPayments.openFromApi(data.detail || {}); return; }
     if (response.status === 503 && data?.detail?.code === 'revision_service_unavailable') {
-      throw new Error(apiErrorMessage(data.detail, 'The revision service is temporarily unavailable. Your paid revision remains available.'));
+      const notes = Array.isArray(data.detail.provider_notes) ? data.detail.provider_notes.filter(Boolean).slice(0, 3) : [];
+      const base = apiErrorMessage(data.detail, 'The revision service is temporarily unavailable. Your paid revision remains available.');
+      throw new Error(notes.length ? `${base} Processing note: ${notes.join('; ')}` : base);
     }
     if (!response.ok) throw new Error(apiErrorMessage(data.detail ?? data, 'Article revision failed.'));
     lastResult = data;
@@ -160,7 +162,10 @@ form.addEventListener('submit', async (event) => {
     const densityNote = density.word_count ? ` Citation density: ${Number(density.citation_occurrences_per_1000_words || 0).toFixed(1)} per 1,000 words, minimum ${Number(density.minimum_target || 0)}, preferred ${Number(density.preferred_target || 0)}.` : '';
     const humanizer = data.humanizer_report || {};
     const humanizerNote = humanizer.mode ? ` Humanizer: ${humanizer.mode}${humanizer.model_pass_applied ? ' with preservation-gated model pass' : ''}.` : '';
-    revisionMeta.innerHTML = `<strong>${data.mode === 'ai_revision' ? 'Revision completed' : 'Fallback output returned'}.</strong> ${sourceCount} scholarly record(s) passed to the revision workflow.${densityNote}${humanizerNote} ${data.revision_colour_note || ''}`;
+    const batchCount = Number(data.revision_batch_count || 0);
+    const batchNote = data.revision_batching_applied ? ` The manuscript was revised in ${batchCount} section batch(es) to reduce truncation and timeout risk.` : ' The manuscript was revised in one substantive pass.';
+    const modelNote = data.model_used ? ` Model routing: ${data.model_used}${data.reasoning_effort ? `, primary reasoning ${data.reasoning_effort}` : ''}.` : '';
+    revisionMeta.innerHTML = `<strong>${data.mode === 'ai_revision' ? 'Revision completed' : 'Fallback output returned'}.</strong>${batchNote}${modelNote} ${sourceCount} scholarly record(s) passed to the revision workflow.${densityNote}${humanizerNote} ${data.revision_colour_note || ''}`;
     enableOutputs(Boolean(revisedArticle.value.trim()));
     message(errors.length ? `Revision completed with ${errors.length} provider warning(s). Review the report before using the manuscript.` : 'Revision completed. Review the manuscript, report and any suggested analyses before downloading.');
   } catch (error) {
