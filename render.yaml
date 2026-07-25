@@ -16,26 +16,74 @@ services:
         value: 3.12.11
       - key: OPENAI_API_KEY
         sync: false
+      - key: ARTICLEREADY_ALLOW_NON_GPT56_MODELS
+        value: "0"
       - key: OPENAI_ARTICLE_STANDARD_MODEL
-        value: gpt-5-mini
+        value: gpt-5.6-terra
       - key: OPENAI_ARTICLE_ADVANCED_MODEL
-        value: gpt-5.1
+        value: gpt-5.6-terra
       - key: OPENAI_ARTICLE_REVISION_MODEL
-        value: gpt-5.1
+        value: gpt-5.6-terra
+      - key: OPENAI_ARTICLE_HUMANIZER_MODEL
+        value: gpt-5.6-terra
+      - key: OPENAI_ARTICLE_FAST_MODEL
+        value: gpt-5.6-luna
+      - key: OPENAI_ARTICLE_REVISION_PLAN_MODEL
+        value: gpt-5.6-luna
+      - key: OPENAI_ARTICLE_ESCALATION_MODEL
+        value: gpt-5.6-sol
       - key: OPENAI_ARTICLE_FALLBACK_MODELS
-        value: gpt-5.1,gpt-5,gpt-5-mini
+        value: gpt-5.6-terra,gpt-5.6-sol
+      - key: OPENAI_ARTICLE_STANDARD_REASONING
+        value: xhigh
+      - key: OPENAI_ARTICLE_ADVANCED_REASONING
+        value: xhigh
+      - key: OPENAI_ARTICLE_RECOVERY_REASONING
+        value: high
+      - key: OPENAI_ARTICLE_REVISION_REASONING
+        value: xhigh
+      - key: OPENAI_ARTICLE_REVISION_RECOVERY_REASONING
+        value: high
+      - key: OPENAI_ARTICLE_REVISION_REPORT_REASONING
+        value: high
+      - key: OPENAI_ARTICLE_HUMANIZER_REASONING
+        value: high
+      - key: OPENAI_ARTICLE_FAST_REASONING
+        value: high
+      - key: OPENAI_ARTICLE_ESCALATION_REASONING
+        value: high
       - key: OPENAI_ARTICLEREADY_TIMEOUT_SECONDS
-        value: "180"
+        value: "600"
+      - key: ARTICLEREADY_REVISION_TIMEOUT_SECONDS
+        value: "600"
       - key: OPENAI_ARTICLEREADY_SDK_RETRIES
-        value: "2"
-      - key: OPENAI_ARTICLEREADY_ATTEMPTS_PER_MODEL
-        value: "2"
-      - key: OPENAI_ARTICLEREADY_CHAT_FALLBACK
         value: "1"
+      - key: OPENAI_ARTICLEREADY_ATTEMPTS_PER_MODEL
+        value: "1"
+      - key: OPENAI_ARTICLEREADY_CHAT_FALLBACK
+        value: "0"
       - key: ARTICLEREADY_REVISION_USE_AI
         value: "1"
       - key: ARTICLEREADY_ALLOW_REVISION_FALLBACK
         value: "0"
+      - key: ARTICLEREADY_REVISION_BATCH_THRESHOLD_WORDS
+        value: "4500"
+      - key: ARTICLEREADY_REVISION_SECTION_MAX_WORDS
+        value: "2400"
+      - key: ARTICLEREADY_REVISION_MAX_SOURCE_CONTEXT
+        value: "60"
+      - key: ARTICLEREADY_REVISION_PLAN_ENABLED
+        value: "1"
+      - key: ARTICLEREADY_REVISION_SECOND_HUMANIZER_MODEL_PASS
+        value: "0"
+      - key: ARTICLEREADY_REVISION_PLAN_MAX_OUTPUT_TOKENS
+        value: "4500"
+      - key: ARTICLEREADY_REVISION_SECTION_MAX_OUTPUT_TOKENS
+        value: "14000"
+      - key: ARTICLEREADY_REVISION_REPORT_MAX_OUTPUT_TOKENS
+        value: "7000"
+      - key: ARTICLEREADY_REVIEWER_MATRIX_MAX_OUTPUT_TOKENS
+        value: "4500"
       - key: SEMANTIC_SCHOLAR_API_KEY
         sync: false
       - key: OPENALEX_MAILTO

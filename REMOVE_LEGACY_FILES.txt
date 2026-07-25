@@ -1,0 +1,14 @@
+ArticleReady AI 2.2.0 cleanup
+
+The complete package already excludes these unrelated or local-only files. When applying only the update-files package to an older repository, remove:
+
+- RELEASE_NOTES_v2.5.0.md
+- RELEASE_NOTES_v2.6.0.md
+- RELEASE_NOTES_v2.6.1.md
+- test_developer_access.py at the repository root
+- legacy tests that import V-Professor modules such as app.ai_config, app.review_engine, app.annotated_exporter, app.auth or app.database
+- .pytest_cache/
+- all __pycache__/ folders and *.pyc files
+- local *.db files
+
+Keep the nine ArticleReady tests included in the updated tests/ directory.

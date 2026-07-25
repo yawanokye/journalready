@@ -5,7 +5,7 @@
 All OpenAI-backed workflows now use only:
 
 - `gpt-5.6-terra` for standard drafting, cost-balanced work and the optional scholarly-humaniser model pass.
-- `gpt-5.6-sol` for research-master's and doctoral depth, review/conceptual/systematic articles, long or batch articles, Stage 2 article completion and article revision.
+- `gpt-5.6-terra` with xhigh reasoning for research-master's and doctoral depth, review/conceptual/systematic articles, long or batch articles, Stage 2 article completion and article revision. `gpt-5.6-sol` is reserved for exceptional escalation.
 
 Legacy GPT-5.4 and GPT-5.5 values are normalised away at runtime. Article Topic Ideas remains on DeepSeek V4 Pro.
 
@@ -38,8 +38,8 @@ Copy the environment values from `.env.example`, especially:
 
 ```text
 OPENAI_ARTICLE_TERRA_MODEL=gpt-5.6-terra
-OPENAI_ARTICLE_SOL_MODEL=gpt-5.6-sol
-OPENAI_ARTICLE_REVISION_MODEL=gpt-5.6-sol
+OPENAI_ARTICLE_ESCALATION_MODEL=gpt-5.6-sol
+OPENAI_ARTICLE_REVISION_MODEL=gpt-5.6-terra
 OPENAI_ARTICLE_HUMANIZER_MODEL=gpt-5.6-terra
 ARTICLEREADY_HUMANIZER_MODE=balanced
 ARTICLEREADY_HUMANIZER_MODEL_PASS=1

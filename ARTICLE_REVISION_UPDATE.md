@@ -28,5 +28,5 @@ The revision export compares the existing article with the revised manuscript. A
 
 ## Configuration
 
-- `OPENAI_ARTICLE_REVISION_MODEL=gpt-5.6-sol`
+- `OPENAI_ARTICLE_REVISION_MODEL=gpt-5.6-terra`
 - `ARTICLEREADY_REVISION_USE_AI=1`
