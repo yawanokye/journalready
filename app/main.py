@@ -46,7 +46,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="ArticleReady AI",
     description="Journal article ideation, auditable review-evidence management, staged drafting, research-resource guidance, instrument planning, polishing and revision assistant.",
-    version="2.2.0",
+    version="2.2.1",
     docs_url="/docs" if env_bool("ARTICLEREADY_ENABLE_API_DOCS", False) else None,
     redoc_url="/redoc" if env_bool("ARTICLEREADY_ENABLE_API_DOCS", False) else None,
     openapi_url="/openapi.json" if env_bool("ARTICLEREADY_ENABLE_API_DOCS", False) else None,

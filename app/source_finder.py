@@ -90,6 +90,19 @@ def build_source_query(profile: dict[str, Any], user_query: str = "") -> str:
     return query[:MAX_QUERY_CHARS]
 
 
+
+
+def _provider_plain_query(query: str, max_chars: int = 180) -> str:
+    """Return a conservative plain-text query accepted by metadata providers."""
+    value = re.sub(r"[-–—_/]+", " ", str(query or ""))
+    value = re.sub(r'[^\w\s\'"]+', ' ', value, flags=re.UNICODE)
+    value = re.sub(r"\s+", " ", value).strip()
+    if len(value) <= max_chars:
+        return value
+    clipped = value[:max_chars].rsplit(" ", 1)[0].strip()
+    return clipped or value[:max_chars].strip()
+
+
 def _should_search_eric(profile: dict[str, Any], query: str) -> bool:
     text = " ".join(
         str(profile.get(key) or "")
@@ -192,15 +205,30 @@ def search_literature_sources(
 
 def _search_openalex(query: str, per_provider: int = 10) -> list[dict[str, Any]]:
     params = {
-        "search": query,
+        "search": _provider_plain_query(query, 180),
         "per-page": min(per_provider, 25),
-        "sort": "relevance_score:desc",
     }
     mailto = os.getenv("OPENALEX_MAILTO", "").strip()
     if mailto:
         params["mailto"] = mailto
     url = "https://api.openalex.org/works?" + urlencode(params)
-    data = _get_json(url)
+    try:
+        data = _get_json(url)
+    except RuntimeError as exc:
+        # Some long or punctuation-heavy article titles are rejected as bad
+        # queries. Retry once with a compact keyword-only query rather than
+        # allowing a nonessential metadata lookup to disrupt revision.
+        if "HTTP 400" not in str(exc):
+            raise
+        compact_terms = [
+            token for token in re.findall(r"[A-Za-z0-9]{3,}", str(query or ""))
+            if token.lower() not in {"the", "and", "for", "with", "from", "into", "using", "study", "article"}
+        ][:14]
+        fallback_query = " ".join(compact_terms) or _provider_plain_query(query, 100)
+        retry_params = {"search": fallback_query, "per-page": min(per_provider, 25)}
+        if mailto:
+            retry_params["mailto"] = mailto
+        data = _get_json("https://api.openalex.org/works?" + urlencode(retry_params))
     results = data.get("results") or []
     records: list[dict[str, Any]] = []
     for item in results:
@@ -280,7 +308,7 @@ def _search_crossref(query: str, per_provider: int = 10) -> list[dict[str, Any]]
 
 def _search_semantic_scholar(query: str, per_provider: int = 10) -> list[dict[str, Any]]:
     params = {
-        "query": query,
+        "query": _provider_plain_query(query, 180),
         "limit": min(per_provider, 20),
         "fields": "title,authors,year,venue,url,abstract,citationCount,externalIds,isOpenAccess,publicationTypes",
     }

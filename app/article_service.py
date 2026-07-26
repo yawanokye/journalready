@@ -265,11 +265,13 @@ def _call_openai_response_with_fallback(
     fallback_reasoning_effort: str = "high",
     request_timeout_seconds: float | None = None,
     include_configured_fallbacks: bool = True,
+    require_completed: bool = False,
     purpose: str = "article_request",
 ) -> tuple[str, str, list[str]]:
     """Call the GPT-5.6 Responses API with bounded, cost-aware recovery."""
     errors: list[str] = []
     last_exc: Exception | None = None
+    best_partial: tuple[str, str] | None = None
     attempts_per_effort = max(1, min(int(os.getenv("OPENAI_ARTICLEREADY_ATTEMPTS_PER_MODEL", "1") or 1), 2))
     base_delay = max(0.5, float(os.getenv("OPENAI_ARTICLEREADY_RETRY_BASE_SECONDS", "1.5") or 1.5))
     primary = _normalise_gpt56_model(primary_model, "gpt-5.6-terra") or "gpt-5.6-terra"
@@ -314,19 +316,36 @@ def _call_openai_response_with_fallback(
                     text = _extract_text(response)
                     status = str(getattr(response, "status", "completed") or "completed")
                     response_id = str(getattr(response, "id", "") or "")
+                    incomplete = getattr(response, "incomplete_details", None)
+                    incomplete_reason = str(getattr(incomplete, "reason", "") or "").strip()
+                    if not incomplete_reason and isinstance(incomplete, dict):
+                        incomplete_reason = str(incomplete.get("reason") or "").strip()
+                    incomplete_note = incomplete_reason or str(incomplete or "unspecified")
                     if text:
-                        if status != "completed":
-                            errors.append(f"{model} returned text with response status {status}.")
                         LOGGER.info(
                             "OpenAI request completed purpose=%s model=%s reasoning=%s response_id=%s status=%s output_chars=%s elapsed_seconds=%.2f",
                             purpose, model, effort, response_id, status, len(text), elapsed,
                         )
-                        return text, model, errors
-                    incomplete = getattr(response, "incomplete_details", None)
-                    errors.append(f"{model} returned no usable text; status={status}; incomplete={incomplete!s}.")
+                        if status == "completed":
+                            return text, model, errors
+                        errors.append(
+                            f"{model} returned partial text with response status {status}; incomplete_reason={incomplete_note}."
+                        )
+                        if best_partial is None or len(text) > len(best_partial[0]):
+                            best_partial = (text, model)
+                        if not require_completed:
+                            return text, model, errors
+                        LOGGER.warning(
+                            "OpenAI response incomplete purpose=%s model=%s reasoning=%s reason=%s output_chars=%s elapsed_seconds=%.2f",
+                            purpose, model, effort, incomplete_note, len(text), elapsed,
+                        )
+                        break
+                    errors.append(
+                        f"{model} returned no usable text; status={status}; incomplete_reason={incomplete_note}."
+                    )
                     LOGGER.warning(
-                        "OpenAI request returned no text purpose=%s model=%s reasoning=%s status=%s elapsed_seconds=%.2f",
-                        purpose, model, effort, status, elapsed,
+                        "OpenAI request returned no text purpose=%s model=%s reasoning=%s status=%s incomplete_reason=%s elapsed_seconds=%.2f",
+                        purpose, model, effort, status, incomplete_note, elapsed,
                     )
                     break
                 except Exception as exc:  # pragma: no cover - provider behaviour varies
@@ -380,6 +399,13 @@ def _call_openai_response_with_fallback(
 
     if last_exc:
         raise RuntimeError("; ".join(errors[-10:])) from last_exc
+    if require_completed and best_partial is not None:
+        raise RuntimeError(
+            "No configured GPT-5.6 model returned a completed response. "
+            + "; ".join(errors[-10:])
+        )
+    if errors:
+        raise RuntimeError("; ".join(errors[-10:]))
     raise RuntimeError("No configured GPT-5.6 model returned usable text.")
 
 

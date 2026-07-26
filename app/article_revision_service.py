@@ -224,14 +224,16 @@ def _revision_changed(original: str, revised: str) -> bool:
 
 
 def _public_revision_failure(provider_errors: list[Any]) -> RevisionServiceUnavailable:
-    notes: list[str] = []
-    for item in provider_errors[-8:]:
+    processing_notes: list[str] = []
+    source_warnings: list[str] = []
+    for item in provider_errors[-12:]:
         if isinstance(item, dict):
             provider = str(item.get("provider") or "provider")
             error = str(item.get("error") or "temporary error")
-            notes.append(f"{provider}: {error[:180]}")
+            source_warnings.append(f"Source warning, non-blocking: {provider}: {error[:170]}")
         else:
-            notes.append(str(item)[:220])
+            processing_notes.append(str(item)[:240])
+    notes = processing_notes[-6:] + source_warnings[-3:]
     return RevisionServiceUnavailable(
         "The revision service could not complete and validate a substantive full-manuscript revision. "
         "No revision entitlement has been consumed. Retry the request and review the processing notes or Render logs for the exact failed stage.",
@@ -339,6 +341,47 @@ def _split_revision_sections(article_text: str) -> list[dict[str, Any]]:
     }]
 
 
+def _split_long_text_unit(text: str, max_words: int) -> list[str]:
+    """Split a long paragraph without cutting ordinary sentences where possible."""
+    value = str(text or "").strip()
+    if not value:
+        return []
+    if _word_count(value) <= max_words:
+        return [value]
+
+    sentences = [
+        item.strip()
+        for item in re.split(r"(?<=[.!?])\s+(?=[A-Z0-9\[])|\n+", value)
+        if item.strip()
+    ]
+    if len(sentences) <= 1:
+        words = value.split()
+        return [" ".join(words[i:i + max_words]).strip() for i in range(0, len(words), max_words)]
+
+    chunks: list[str] = []
+    current: list[str] = []
+    current_words = 0
+    for sentence in sentences:
+        sentence_words = _word_count(sentence)
+        if sentence_words > max_words:
+            if current:
+                chunks.append(" ".join(current).strip())
+                current = []
+                current_words = 0
+            words = sentence.split()
+            chunks.extend(" ".join(words[i:i + max_words]).strip() for i in range(0, len(words), max_words))
+            continue
+        if current and current_words + sentence_words > max_words:
+            chunks.append(" ".join(current).strip())
+            current = []
+            current_words = 0
+        current.append(sentence)
+        current_words += sentence_words
+    if current:
+        chunks.append(" ".join(current).strip())
+    return [item for item in chunks if item]
+
+
 def _split_oversized_section(section: dict[str, Any], max_words: int) -> list[dict[str, Any]]:
     text = str(section.get("text") or "").strip()
     heading = str(section.get("heading") or "").strip()
@@ -351,6 +394,23 @@ def _split_oversized_section(section: dict[str, Any], max_words: int) -> list[di
     if lines and heading and lines[0].strip() == heading:
         heading_line = lines.pop(0)
 
+    units: list[str] = []
+    paragraph_buffer: list[str] = []
+
+    def flush_paragraph() -> None:
+        nonlocal paragraph_buffer
+        paragraph = "\n".join(paragraph_buffer).strip()
+        if paragraph:
+            units.extend(_split_long_text_unit(paragraph, max_words))
+        paragraph_buffer = []
+
+    for line in lines:
+        if not line.strip():
+            flush_paragraph()
+        else:
+            paragraph_buffer.append(line)
+    flush_paragraph()
+
     chunks: list[dict[str, Any]] = []
     current: list[str] = []
     current_words = 0
@@ -361,7 +421,7 @@ def _split_oversized_section(section: dict[str, Any], max_words: int) -> list[di
         if not current:
             return
         part += 1
-        body = "\n".join(current).strip()
+        body = "\n\n".join(current).strip()
         if part == 1 and heading_line:
             body = f"{heading_line}\n{body}".strip()
         chunks.append({
@@ -373,18 +433,52 @@ def _split_oversized_section(section: dict[str, Any], max_words: int) -> list[di
         current = []
         current_words = 0
 
-    for line in lines:
-        words = _word_count(line)
+    for unit in units:
+        words = _word_count(unit)
         if current and current_words + words > max_words:
             flush()
-        current.append(line)
+        current.append(unit)
         current_words += words
     flush()
     return chunks or [{"heading": heading, "text": text, "protected": protected, "continuation": False}]
 
 
+def _heading_family(heading: str) -> str:
+    """Return a stable family so Results and Discussion are never packed together."""
+    value = re.sub(r"^#{1,6}\s*", "", str(heading or "").strip())
+    numbered = re.match(r"^(\d+)(?:\.\d+)*\.?\s+", value)
+    if numbered:
+        return f"numbered:{numbered.group(1)}"
+    lower = value.lower()
+    if lower in {"", "title", "keywords", "key words"} or lower.startswith("abstract"):
+        return "front_matter"
+    families = [
+        ("introduction", ["introduction", "background"]),
+        ("literature", ["literature review", "theoretical framework", "conceptual framework"]),
+        ("methods", ["method", "methodology", "materials and methods"]),
+        ("results", ["result", "findings", "analysis"]),
+        ("discussion", ["discussion"]),
+        ("conclusion", ["conclusion", "recommendation", "implication", "limitation"]),
+        ("declarations", ["declaration", "funding", "competing interest", "conflict of interest", "author contribution", "data availability", "ethics approval", "acknowledgement"]),
+        ("protected", ["reference", "bibliography", "source use audit", "appendix"]),
+    ]
+    for family, prefixes in families:
+        if any(lower.startswith(prefix) for prefix in prefixes):
+            return family
+    return re.sub(r"[^a-z0-9]+", "_", lower)[:40] or "other"
+
+
 def _split_revision_batches(article_text: str) -> list[dict[str, Any]]:
-    max_words = _env_int("ARTICLEREADY_REVISION_SECTION_MAX_WORDS", 2400, minimum=900, maximum=5000)
+    max_words = _env_int("ARTICLEREADY_REVISION_SECTION_MAX_WORDS", 1400, minimum=500, maximum=4000)
+    pack_limit = _env_int(
+        "ARTICLEREADY_REVISION_PACK_MAX_WORDS",
+        min(max_words, 1400),
+        minimum=400,
+        maximum=max_words,
+    )
+    pack_short = str(os.getenv("ARTICLEREADY_REVISION_PACK_SHORT_SECTIONS", "1") or "1").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
     sections = _split_revision_sections(article_text)
     raw_batches: list[dict[str, Any]] = []
     for section in sections:
@@ -392,15 +486,13 @@ def _split_revision_batches(article_text: str) -> list[dict[str, Any]]:
     if not raw_batches:
         raw_batches = [{"heading": "Complete manuscript", "text": article_text, "protected": False, "continuation": False}]
 
-    # Pack adjacent short sections together. This avoids paying for a separate
-    # high-reasoning request for a title page or very short subsection while
-    # keeping references and other protected sections isolated.
     batches: list[dict[str, Any]] = []
     current: list[dict[str, Any]] = []
     current_words = 0
+    current_family = ""
 
     def flush() -> None:
-        nonlocal current, current_words
+        nonlocal current, current_words, current_family
         if not current:
             return
         labels = [str(item.get("heading") or "").strip() for item in current if str(item.get("heading") or "").strip()]
@@ -414,18 +506,27 @@ def _split_revision_batches(article_text: str) -> list[dict[str, Any]]:
         })
         current = []
         current_words = 0
+        current_family = ""
 
     for item in raw_batches:
         item_text = str(item.get("text") or "").strip()
         item_words = _word_count(item_text)
+        item_family = _heading_family(str(item.get("heading") or ""))
         if bool(item.get("protected")):
             flush()
             batches.append({**item, "label": str(item.get("heading") or "Protected reference section")})
             continue
-        if current and current_words + item_words > max_words:
+
+        family_boundary = bool(current and current_family and item_family != current_family)
+        would_overflow = bool(current and current_words + item_words > pack_limit)
+        continuation = bool(item.get("continuation"))
+        if current and (family_boundary or would_overflow or not pack_short or continuation):
             flush()
         current.append(item)
         current_words += item_words
+        current_family = item_family
+        if continuation:
+            flush()
     flush()
 
     for index, batch in enumerate(batches, start=1):
@@ -433,6 +534,7 @@ def _split_revision_batches(article_text: str) -> list[dict[str, Any]]:
         batch["word_count"] = _word_count(str(batch.get("text") or ""))
         batch["label"] = str(batch.get("label") or batch.get("heading") or "").strip() or f"Manuscript part {index}"
     return batches
+
 
 def _source_records_for_section(label: str, source_records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     lower = str(label or "").lower()
@@ -518,6 +620,7 @@ def _build_revision_plan(
             fallback_reasoning_effort="high",
             request_timeout_seconds=min(_revision_timeout_seconds(), 420),
             include_configured_fallbacks=False,
+            require_completed=True,
             purpose="revision_plan",
         )
         provider_errors.extend(notes)
@@ -528,8 +631,17 @@ def _build_revision_plan(
 
 
 def _section_output_tokens(word_count: int) -> int:
-    hard_cap = _env_int("ARTICLEREADY_REVISION_SECTION_MAX_OUTPUT_TOKENS", 14000, minimum=4000, maximum=30000)
-    return max(2600, min(hard_cap, int(max(500, word_count) * 2.25 + 900)))
+    """Allow room for both visible revision text and GPT-5.6 reasoning tokens."""
+    hard_cap = _env_int(
+        "ARTICLEREADY_REVISION_SECTION_MAX_OUTPUT_TOKENS",
+        24000,
+        minimum=8000,
+        maximum=50000,
+    )
+    # max_output_tokens includes visible output and reasoning tokens. A small
+    # multiple of the source word count is insufficient at high/xhigh effort.
+    requested = int(max(350, word_count) * 3.6 + 6500)
+    return max(8000, min(hard_cap, requested))
 
 
 def _section_revision_is_usable(original: str, revised: str) -> tuple[bool, str]:
@@ -537,9 +649,60 @@ def _section_revision_is_usable(original: str, revised: str) -> tuple[bool, str]
     revised_clean = re.sub(r"\s+", " ", str(revised or "")).strip()
     if not revised_clean:
         return False, "empty section response"
-    if len(revised_clean) < max(1, int(len(original_clean) * 0.50)):
+    minimum_ratio = float(os.getenv("ARTICLEREADY_REVISION_MIN_SECTION_LENGTH_RATIO", "0.58") or 0.58)
+    minimum_ratio = max(0.35, min(minimum_ratio, 0.90))
+    if len(revised_clean) < max(1, int(len(original_clean) * minimum_ratio)):
         return False, "section response was substantially truncated"
+    # A response ending in an unfinished Markdown marker or mid-sentence is a
+    # strong sign that visible output was cut off even when the length ratio passes.
+    tail = revised_clean[-180:]
+    if tail.count("[") > tail.count("]") or tail.count("(") > tail.count(")"):
+        return False, "section response ended with an unfinished structure"
     return True, ""
+
+
+def _retry_sub_batches(batch: dict[str, Any], target_words: int) -> list[dict[str, Any]]:
+    original = str(batch.get("text") or "").strip()
+    sections = _split_revision_sections(original)
+    pieces: list[dict[str, Any]] = []
+    if len(sections) > 1:
+        for section in sections:
+            pieces.extend(_split_oversized_section(section, target_words))
+    else:
+        section = {
+            "heading": str(batch.get("heading") or ""),
+            "text": original,
+            "protected": False,
+        }
+        pieces.extend(_split_oversized_section(section, target_words))
+
+    # Ensure a hard split even for an unusual single-line section that resisted
+    # heading and paragraph parsing.
+    if len(pieces) <= 1 and _word_count(original) > target_words:
+        words = original.split()
+        pieces = []
+        heading = str(batch.get("heading") or "")
+        for index in range(0, len(words), target_words):
+            chunk = " ".join(words[index:index + target_words]).strip()
+            pieces.append({
+                "heading": heading,
+                "text": chunk,
+                "protected": False,
+                "continuation": index > 0,
+            })
+
+    results: list[dict[str, Any]] = []
+    for index, piece in enumerate(pieces, start=1):
+        text = str(piece.get("text") or "").strip()
+        if not text:
+            continue
+        heading = str(piece.get("heading") or batch.get("heading") or "").strip()
+        results.append({
+            **piece,
+            "label": heading or f"{batch.get('label') or 'Section'} retry part {index}",
+            "word_count": _word_count(text),
+        })
+    return results
 
 
 def _revise_section_batch(
@@ -552,6 +715,8 @@ def _revise_section_batch(
     batch_number: int,
     total_batches: int,
     source_records: list[dict[str, Any]],
+    retry_depth: int = 0,
+    purpose_suffix: str = "",
 ) -> tuple[str, str, list[str]]:
     original = str(batch.get("text") or "").strip()
     label = str(batch.get("label") or f"Manuscript part {batch_number}")
@@ -569,6 +734,7 @@ def _revise_section_batch(
             "section_label": label,
             "continuation_of_same_section": bool(batch.get("continuation")),
             "original_word_count": int(batch.get("word_count") or _word_count(original)),
+            "retry_depth": retry_depth,
         },
         "scholarly_source_records": _source_records_for_section(label, source_records),
         "citation_density_requirements": _citation_density_requirements(payload),
@@ -585,33 +751,97 @@ def _revise_section_batch(
             "Use polished formal British English, varied sentence rhythm and natural transitions without artificial errors or commentary about humanisation.",
             "Keep the section close to its original length unless clarity requires modest expansion or compression.",
             "Preserve the exact section heading. When continuation_of_same_section is true, do not repeat the heading.",
+            "Finish the section completely. Do not stop mid-sentence, mid-table or inside an author-action marker.",
             "Return only the revised section in Markdown. Do not provide a report, preface, explanation or code fence.",
         ],
     }
-    raw, model_used, notes = _call_openai_response_with_fallback(
-        client,
-        primary_model=_revision_model(),
-        fallback_model=_revision_escalation_model(),
-        instructions=(
-            "You are ArticleReady AI's senior journal revision editor. Produce a rigorous, evidence-preserving revision of only the supplied manuscript section. "
-            "Never invent analysis or results. Return the section only."
-        ),
-        input_payload=json.dumps(prompt, ensure_ascii=False, indent=2),
-        max_output_tokens=_section_output_tokens(int(batch.get("word_count") or _word_count(original))),
-        reasoning_effort=_revision_reasoning(),
-        recovery_reasoning_effort=_revision_recovery_reasoning(),
-        fallback_reasoning_effort=os.getenv("OPENAI_ARTICLE_ESCALATION_REASONING", "high"),
-        request_timeout_seconds=_revision_timeout_seconds(),
-        include_configured_fallbacks=False,
-        purpose=f"revision_section_{batch_number}_of_{total_batches}",
+
+    notes: list[str] = []
+    failure: Exception | None = None
+    revised = ""
+    used_model = ""
+    try:
+        raw, used_model, provider_notes = _call_openai_response_with_fallback(
+            client,
+            primary_model=_revision_model(),
+            # Sol is reserved for exceptional escalation after two rounds of
+            # smaller Terra recovery batches. Output truncation is usually a
+            # batching problem, not a reason to pay for Sol on the same large input.
+            fallback_model=_revision_escalation_model() if retry_depth >= 2 else "",
+            instructions=(
+                "You are ArticleReady AI's senior journal revision editor. Produce a rigorous, evidence-preserving revision of only the supplied manuscript section. "
+                "Never invent analysis or results. Return the complete section only."
+            ),
+            input_payload=json.dumps(prompt, ensure_ascii=False, indent=2),
+            max_output_tokens=_section_output_tokens(int(batch.get("word_count") or _word_count(original))),
+            reasoning_effort=_revision_reasoning() if retry_depth == 0 else _revision_recovery_reasoning(),
+            recovery_reasoning_effort=_revision_recovery_reasoning(),
+            fallback_reasoning_effort=os.getenv("OPENAI_ARTICLE_ESCALATION_REASONING", "high"),
+            request_timeout_seconds=_revision_timeout_seconds(),
+            include_configured_fallbacks=False,
+            require_completed=True,
+            purpose=f"revision_section_{batch_number}_of_{total_batches}{purpose_suffix}_depth_{retry_depth}",
+        )
+        notes.extend(provider_notes)
+        revised = _strip_code_fences(raw)
+        if "===REVISED_ARTICLE===" in revised:
+            revised = revised.split("===REVISED_ARTICLE===", 1)[1].strip()
+        usable, reason = _section_revision_is_usable(original, revised)
+        if not usable:
+            failure = RuntimeError(f"{label}: {reason}")
+    except Exception as exc:
+        failure = exc
+
+    if failure is None:
+        return revised, used_model, notes
+
+    max_depth = _env_int("ARTICLEREADY_REVISION_RETRY_SPLIT_MAX_DEPTH", 3, minimum=1, maximum=5)
+    min_retry_words = _env_int("ARTICLEREADY_REVISION_RETRY_MIN_WORDS", 280, minimum=120, maximum=800)
+    original_words = _word_count(original)
+    if retry_depth >= max_depth or original_words <= min_retry_words:
+        raise RuntimeError(f"{label}: {str(failure)[:260]}") from failure
+
+    target_words = max(min_retry_words, min(700, max(220, original_words // 2)))
+    children = _retry_sub_batches(batch, target_words)
+    if len(children) <= 1:
+        raise RuntimeError(f"{label}: {str(failure)[:260]}") from failure
+
+    LOGGER.warning(
+        "Revision section split-retry label=%s original_words=%s child_count=%s retry_depth=%s error=%s",
+        label,
+        original_words,
+        len(children),
+        retry_depth + 1,
+        str(failure)[:180],
     )
-    revised = _strip_code_fences(raw)
-    if "===REVISED_ARTICLE===" in revised:
-        revised = revised.split("===REVISED_ARTICLE===", 1)[1].strip()
-    usable, reason = _section_revision_is_usable(original, revised)
+    notes.append(
+        f"Section '{label[:120]}' was automatically divided into {len(children)} smaller recovery batches after an incomplete or truncated response."
+    )
+    revised_parts: list[str] = []
+    models: list[str] = []
+    for child_index, child in enumerate(children, start=1):
+        child_text, child_model, child_notes = _revise_section_batch(
+            client,
+            payload=payload,
+            article_inputs=article_inputs,
+            revision_plan=revision_plan,
+            batch=child,
+            batch_number=batch_number,
+            total_batches=total_batches,
+            source_records=source_records,
+            retry_depth=retry_depth + 1,
+            purpose_suffix=f"_sub_{child_index}_of_{len(children)}",
+        )
+        revised_parts.append(child_text.strip())
+        notes.extend(child_notes)
+        if child_model and child_model not in models:
+            models.append(child_model)
+
+    combined = "\n\n".join(part for part in revised_parts if part).strip()
+    usable, reason = _section_revision_is_usable(original, combined)
     if not usable:
-        raise RuntimeError(f"{label}: {reason}")
-    return revised, model_used, notes
+        raise RuntimeError(f"{label}: split-retry assembly failed validation: {reason}")
+    return combined, ", ".join(models) or _revision_model(), notes
 
 
 def _fallback_completed_revision_report(
@@ -690,6 +920,7 @@ def _generate_revision_report(
             fallback_reasoning_effort="high",
             request_timeout_seconds=_revision_timeout_seconds(),
             include_configured_fallbacks=False,
+            require_completed=True,
             purpose="revision_report",
         )
         provider_errors.extend(notes)
@@ -751,6 +982,7 @@ def _generate_reviewer_matrix(
             fallback_reasoning_effort="high",
             request_timeout_seconds=min(_revision_timeout_seconds(), 420),
             include_configured_fallbacks=False,
+            require_completed=True,
             purpose="reviewer_response_matrix",
         )
         provider_errors.extend(notes)
