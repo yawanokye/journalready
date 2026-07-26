@@ -69,7 +69,17 @@ services:
       - key: ARTICLEREADY_REVISION_BATCH_THRESHOLD_WORDS
         value: "4500"
       - key: ARTICLEREADY_REVISION_SECTION_MAX_WORDS
-        value: "2400"
+        value: "1400"
+      - key: ARTICLEREADY_REVISION_PACK_MAX_WORDS
+        value: "1400"
+      - key: ARTICLEREADY_REVISION_PACK_SHORT_SECTIONS
+        value: "1"
+      - key: ARTICLEREADY_REVISION_RETRY_SPLIT_MAX_DEPTH
+        value: "3"
+      - key: ARTICLEREADY_REVISION_RETRY_MIN_WORDS
+        value: "280"
+      - key: ARTICLEREADY_REVISION_MIN_SECTION_LENGTH_RATIO
+        value: "0.58"
       - key: ARTICLEREADY_REVISION_MAX_SOURCE_CONTEXT
         value: "60"
       - key: ARTICLEREADY_REVISION_PLAN_ENABLED
@@ -79,7 +89,7 @@ services:
       - key: ARTICLEREADY_REVISION_PLAN_MAX_OUTPUT_TOKENS
         value: "4500"
       - key: ARTICLEREADY_REVISION_SECTION_MAX_OUTPUT_TOKENS
-        value: "14000"
+        value: "24000"
       - key: ARTICLEREADY_REVISION_REPORT_MAX_OUTPUT_TOKENS
         value: "7000"
       - key: ARTICLEREADY_REVIEWER_MATRIX_MAX_OUTPUT_TOKENS

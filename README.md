@@ -1,4 +1,4 @@
-# ArticleReady AI 2.2.0
+# ArticleReady AI 2.2.1
 
 ArticleReady AI supports journal-article topic development, scholarly-source discovery, full article drafting, article revision, DOCX export and an auditable Review Evidence Workspace.
 
@@ -10,7 +10,7 @@ ArticleReady AI supports journal-article topic development, scholarly-source dis
 - **Review Evidence Workspace**: imports database records, manages duplicate decisions and screening, calculates verified record-flow counts and exports the evidence ledger and protocol audit.
 - **Payments and developer access**: supports Paystack, Stripe and restricted developer testing.
 
-## Revision reliability in 2.2.0
+## Revision reliability in 2.2.1
 
 ArticleReady uses a cost-controlled GPT-5.6 workflow:
 
@@ -29,6 +29,17 @@ ARTICLEREADY_ALLOW_NON_GPT56_MODELS=0
 ARTICLEREADY_ALLOW_REVISION_FALLBACK=0
 OPENAI_ARTICLEREADY_CHAT_FALLBACK=0
 ```
+
+
+### Truncation recovery in 2.2.1
+
+- Results and Discussion are no longer packed into the same revision request.
+- Section batches default to 1,400 words and cannot cross a top-level heading family.
+- A response with `status=incomplete` is rejected for manuscript revision and retried at Terra `high` before any escalation.
+- Incomplete or truncated sections are divided automatically into smaller recovery batches and reassembled only after validation.
+- The output allowance now reserves space for both visible revision text and reasoning tokens.
+- Sol is used only after repeated smaller Terra recovery batches fail.
+- OpenAlex retries HTTP 400 searches with a compact plain-text query. Semantic Scholar rate limits remain non-blocking source warnings.
 
 ## Source-provider resilience
 

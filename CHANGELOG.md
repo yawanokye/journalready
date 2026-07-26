@@ -1,5 +1,17 @@
 # ArticleReady AI Changelog
 
+## 2.2.1, incomplete-response and section-truncation recovery
+
+- Treats `status=incomplete` Responses API output as unfinished for revision, report and reviewer-response tasks.
+- Retries Terra at lower reasoning effort before escalating.
+- Separates top-level Results and Discussion batches and reduces the default section batch size to 1,400 words.
+- Automatically splits a failed section into progressively smaller recovery batches and validates the reassembled section.
+- Raises the default section output allowance to 24,000 tokens because the limit covers visible and reasoning tokens.
+- Reserves Sol for exceptional escalation after repeated smaller Terra attempts.
+- Labels OpenAlex and Semantic Scholar failures as non-blocking source warnings.
+- Retries OpenAlex HTTP 400 queries with a compact plain-text query.
+- Adds regression tests for incomplete responses, Results-Discussion boundaries and recursive split recovery.
+
 ## 2.2.0, GPT-5.6 cost-controlled batched revision
 
 - Replaced all GPT-5, GPT-5.1 and GPT-5-mini defaults with GPT-5.6 routing.
