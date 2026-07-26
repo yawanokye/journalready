@@ -150,3 +150,112 @@ def test_startup_model_validation_accepts_gpt56_routing(monkeypatch):
     monkeypatch.setenv("OPENAI_ARTICLE_FALLBACK_MODELS", "gpt-5.6-terra,gpt-5.6-sol")
     configured = validate_gpt56_configuration()
     assert configured["OPENAI_ARTICLE_REVISION_MODEL"] == "gpt-5.6-terra"
+
+
+def test_require_completed_retries_after_incomplete_response(monkeypatch):
+    from app.article_service import _call_openai_response_with_fallback
+
+    calls = []
+
+    class Responses:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                return SimpleNamespace(
+                    output_text="partial text",
+                    status="incomplete",
+                    id="resp-partial",
+                    incomplete_details=SimpleNamespace(reason="max_output_tokens"),
+                )
+            return SimpleNamespace(
+                output_text="complete text",
+                status="completed",
+                id="resp-complete",
+                incomplete_details=None,
+            )
+
+    class Client:
+        responses = Responses()
+
+        def with_options(self, **kwargs):
+            return self
+
+    text, model, notes = _call_openai_response_with_fallback(
+        Client(),
+        primary_model="gpt-5.6-terra",
+        fallback_model="gpt-5.6-sol",
+        instructions="Revise.",
+        input_payload={"article": "text"},
+        max_output_tokens=1000,
+        reasoning_effort="xhigh",
+        recovery_reasoning_effort="high",
+        include_configured_fallbacks=False,
+        require_completed=True,
+        purpose="test_incomplete_recovery",
+    )
+    assert text == "complete text"
+    assert model == "gpt-5.6-terra"
+    assert calls[0]["reasoning"] == {"effort": "xhigh"}
+    assert calls[1]["reasoning"] == {"effort": "high"}
+    assert any("max_output_tokens" in note for note in notes)
+
+
+def test_results_and_discussion_are_not_packed_together(monkeypatch):
+    from app.article_revision_service import _split_revision_batches
+
+    monkeypatch.setenv("ARTICLEREADY_REVISION_SECTION_MAX_WORDS", "2400")
+    monkeypatch.setenv("ARTICLEREADY_REVISION_PACK_MAX_WORDS", "2400")
+    article = "\n\n".join([
+        "4.1 Data coverage\n" + " ".join(["evidence"] * 220),
+        "4.2 Configuration models\n" + " ".join(["model"] * 220),
+        "4.3 Joint tests\n" + " ".join(["diagnostic"] * 220),
+        "4.4 Predicted margins\n" + " ".join(["margin"] * 220),
+        "5. Discussion\n" + " ".join(["interpretation"] * 320),
+    ])
+    batches = _split_revision_batches(article)
+    labels = [item["label"] for item in batches]
+    assert any("4.1 Data coverage" in label for label in labels)
+    assert any(label.startswith("5. Discussion") for label in labels)
+    assert not any("4.4 Predicted margins" in label and "5. Discussion" in label for label in labels)
+
+
+def test_truncated_section_is_split_and_retried(monkeypatch):
+    from app import article_revision_service as service
+
+    body = " ".join(["Confirmed procurement evidence supports the reported result."] * 180)
+    batch = {
+        "heading": "4. Results",
+        "label": "4. Results",
+        "text": "4. Results\n\n" + body,
+        "protected": False,
+        "continuation": False,
+        "word_count": service._word_count(body) + 2,
+    }
+    monkeypatch.setenv("ARTICLEREADY_REVISION_RETRY_SPLIT_MAX_DEPTH", "3")
+    monkeypatch.setenv("ARTICLEREADY_REVISION_RETRY_MIN_WORDS", "120")
+
+    calls = []
+
+    def fake_call(client, **kwargs):
+        data = json.loads(kwargs["input_payload"])
+        original = data["original_section"]
+        calls.append((kwargs["purpose"], service._word_count(original)))
+        if "_depth_0" in kwargs["purpose"]:
+            raise RuntimeError("incomplete_reason=max_output_tokens")
+        return original.replace("Confirmed", "Verified", 1), "gpt-5.6-terra", []
+
+    monkeypatch.setattr(service, "_call_openai_response_with_fallback", fake_call)
+    revised, model, notes = service._revise_section_batch(
+        object(),
+        payload={"article_type": "Empirical article"},
+        article_inputs={"existing_article": batch["text"]},
+        revision_plan="# Plan",
+        batch=batch,
+        batch_number=1,
+        total_batches=1,
+        source_records=[],
+    )
+    assert "Verified" in revised
+    assert model == "gpt-5.6-terra"
+    assert len(calls) >= 3
+    assert any("automatically divided" in note for note in notes)
