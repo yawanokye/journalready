@@ -16,15 +16,23 @@ services:
         value: 3.12.11
       - key: OPENAI_API_KEY
         sync: false
-      - key: ARTICLEREADY_ALLOW_NON_GPT56_MODELS
+      - key: ARTICLEREADY_ALLOWED_MODEL_FAMILIES
+        value: gpt-5.4,gpt-5.5,gpt-5.6
+      - key: ARTICLEREADY_ALLOW_UNAPPROVED_MODELS
         value: "0"
-      - key: OPENAI_ARTICLE_STANDARD_MODEL
-        value: gpt-5.6-terra
-      - key: OPENAI_ARTICLE_ADVANCED_MODEL
-        value: gpt-5.6-terra
+      - key: OPENAI_ARTICLE_WRITING_MODEL
+        value: gpt-5.5
+      - key: OPENAI_ARTICLE_CONCEPTUAL_MODEL
+        value: gpt-5.5
       - key: OPENAI_ARTICLE_REVISION_MODEL
-        value: gpt-5.6-terra
+        value: gpt-5.5
       - key: OPENAI_ARTICLE_HUMANIZER_MODEL
+        value: gpt-5.4
+      - key: OPENAI_ARTICLE_ANALYSIS_MODEL
+        value: gpt-5.6-terra
+      - key: OPENAI_ARTICLE_AUDIT_MODEL
+        value: gpt-5.6-terra
+      - key: OPENAI_ARTICLE_REVISION_RECOVERY_MODEL
         value: gpt-5.6-terra
       - key: OPENAI_ARTICLE_FAST_MODEL
         value: gpt-5.6-luna
@@ -34,19 +42,21 @@ services:
         value: gpt-5.6-sol
       - key: OPENAI_ARTICLE_FALLBACK_MODELS
         value: gpt-5.6-terra,gpt-5.6-sol
-      - key: OPENAI_ARTICLE_STANDARD_REASONING
-        value: xhigh
-      - key: OPENAI_ARTICLE_ADVANCED_REASONING
-        value: xhigh
-      - key: OPENAI_ARTICLE_RECOVERY_REASONING
+      - key: OPENAI_ARTICLE_WRITING_REASONING
+        value: high
+      - key: OPENAI_ARTICLE_CONCEPTUAL_REASONING
         value: high
       - key: OPENAI_ARTICLE_REVISION_REASONING
-        value: xhigh
+        value: high
       - key: OPENAI_ARTICLE_REVISION_RECOVERY_REASONING
         value: high
-      - key: OPENAI_ARTICLE_REVISION_REPORT_REASONING
-        value: high
       - key: OPENAI_ARTICLE_HUMANIZER_REASONING
+        value: medium
+      - key: OPENAI_ARTICLE_ANALYSIS_REASONING
+        value: xhigh
+      - key: OPENAI_ARTICLE_ANALYSIS_RECOVERY_REASONING
+        value: high
+      - key: OPENAI_ARTICLE_REVISION_REPORT_REASONING
         value: high
       - key: OPENAI_ARTICLE_FAST_REASONING
         value: high
@@ -85,7 +95,7 @@ services:
       - key: ARTICLEREADY_REVISION_PLAN_ENABLED
         value: "1"
       - key: ARTICLEREADY_REVISION_SECOND_HUMANIZER_MODEL_PASS
-        value: "0"
+        value: "1"
       - key: ARTICLEREADY_REVISION_PLAN_MAX_OUTPUT_TOKENS
         value: "4500"
       - key: ARTICLEREADY_REVISION_SECTION_MAX_OUTPUT_TOKENS

@@ -1,4 +1,4 @@
-# ArticleReady AI 2.2.1
+# ArticleReady AI 2.3.0
 
 ArticleReady AI supports journal-article topic development, scholarly-source discovery, full article drafting, article revision, DOCX export and an auditable Review Evidence Workspace.
 
@@ -10,36 +10,35 @@ ArticleReady AI supports journal-article topic development, scholarly-source dis
 - **Review Evidence Workspace**: imports database records, manages duplicate decisions and screening, calculates verified record-flow counts and exports the evidence ledger and protocol audit.
 - **Payments and developer access**: supports Paystack, Stripe and restricted developer testing.
 
-## Revision reliability in 2.2.1
+## Hybrid scholarly voice routing in 2.3.0
 
-ArticleReady uses a cost-controlled GPT-5.6 workflow:
+ArticleReady separates analytical work from final scholarly prose:
 
-- GPT-5.6 Terra with `xhigh` reasoning performs substantive article drafting and revision.
-- Terra with `high` reasoning is the first revision recovery pass.
+- GPT-5.5 with `high` reasoning performs substantive article drafting, conceptual writing and manuscript revision.
+- GPT-5.4 with `medium` reasoning performs the selective preservation-gated final naturalness pass.
+- GPT-5.6 Terra performs analytical recovery and revision reporting.
 - GPT-5.6 Luna prepares compact revision plans and reviewer-response support.
-- GPT-5.6 Sol is reserved for exceptional escalation.
-- Old GPT-5, GPT-5.1 and GPT-5-mini defaults are rejected unless a deliberate compatibility override is enabled.
+- GPT-5.6 Sol is reserved for exceptional escalation after smaller recovery batches fail.
 
-Long manuscripts are revised section by section, then reassembled and validated before the revision report and reviewer-response matrix are produced separately. The workflow sends OpenAI requests with `store=false`, logs request purpose and timing without logging manuscript text, and returns a retryable `503 revision_service_unavailable` response when no substantive full-manuscript revision is produced. The paid entitlement claim then rolls back.
+The startup validator accepts approved aliases and dated snapshots from the GPT-5.4, GPT-5.5 and GPT-5.6 families. Long manuscripts are revised section by section, but every batch receives the same global author-voice profile plus boundary context from adjacent sections. This reduces abrupt changes in tone, repeated transitions and the assembled-section effect.
 
-Keep these production settings:
+Keep these production safeguards:
 
 ```env
-ARTICLEREADY_ALLOW_NON_GPT56_MODELS=0
+ARTICLEREADY_ALLOWED_MODEL_FAMILIES=gpt-5.4,gpt-5.5,gpt-5.6
+ARTICLEREADY_ALLOW_UNAPPROVED_MODELS=0
 ARTICLEREADY_ALLOW_REVISION_FALLBACK=0
 OPENAI_ARTICLEREADY_CHAT_FALLBACK=0
 ```
 
+## Truncation recovery
 
-### Truncation recovery in 2.2.1
-
-- Results and Discussion are no longer packed into the same revision request.
+- Results and Discussion are not packed into the same revision request.
 - Section batches default to 1,400 words and cannot cross a top-level heading family.
-- A response with `status=incomplete` is rejected for manuscript revision and retried at Terra `high` before any escalation.
+- A response with `status=incomplete` is rejected and retried through the recovery path.
 - Incomplete or truncated sections are divided automatically into smaller recovery batches and reassembled only after validation.
-- The output allowance now reserves space for both visible revision text and reasoning tokens.
-- Sol is used only after repeated smaller Terra recovery batches fail.
-- OpenAlex retries HTTP 400 searches with a compact plain-text query. Semantic Scholar rate limits remain non-blocking source warnings.
+- GPT-5.6 Sol is used only after repeated smaller recovery batches fail.
+- OpenAlex and Semantic Scholar failures remain non-blocking source warnings.
 
 ## Source-provider resilience
 
@@ -91,21 +90,33 @@ uvicorn app.main:app --reload
 
 ```env
 OPENAI_API_KEY=<secret>
-ARTICLEREADY_ALLOW_NON_GPT56_MODELS=0
-OPENAI_ARTICLE_STANDARD_MODEL=gpt-5.6-terra
-OPENAI_ARTICLE_ADVANCED_MODEL=gpt-5.6-terra
-OPENAI_ARTICLE_REVISION_MODEL=gpt-5.6-terra
-OPENAI_ARTICLE_HUMANIZER_MODEL=gpt-5.6-terra
+ARTICLEREADY_ALLOWED_MODEL_FAMILIES=gpt-5.4,gpt-5.5,gpt-5.6
+ARTICLEREADY_ALLOW_UNAPPROVED_MODELS=0
+
+OPENAI_ARTICLE_WRITING_MODEL=gpt-5.5
+OPENAI_ARTICLE_CONCEPTUAL_MODEL=gpt-5.5
+OPENAI_ARTICLE_REVISION_MODEL=gpt-5.5
+OPENAI_ARTICLE_HUMANIZER_MODEL=gpt-5.4
+OPENAI_ARTICLE_ANALYSIS_MODEL=gpt-5.6-terra
+OPENAI_ARTICLE_AUDIT_MODEL=gpt-5.6-terra
+OPENAI_ARTICLE_REVISION_RECOVERY_MODEL=gpt-5.6-terra
 OPENAI_ARTICLE_FAST_MODEL=gpt-5.6-luna
 OPENAI_ARTICLE_REVISION_PLAN_MODEL=gpt-5.6-luna
 OPENAI_ARTICLE_ESCALATION_MODEL=gpt-5.6-sol
 OPENAI_ARTICLE_FALLBACK_MODELS=gpt-5.6-terra,gpt-5.6-sol
-OPENAI_ARTICLE_ADVANCED_REASONING=xhigh
-OPENAI_ARTICLE_REVISION_REASONING=xhigh
+
+OPENAI_ARTICLE_WRITING_REASONING=high
+OPENAI_ARTICLE_CONCEPTUAL_REASONING=high
+OPENAI_ARTICLE_REVISION_REASONING=high
 OPENAI_ARTICLE_REVISION_RECOVERY_REASONING=high
+OPENAI_ARTICLE_HUMANIZER_REASONING=medium
+OPENAI_ARTICLE_ANALYSIS_REASONING=xhigh
+OPENAI_ARTICLE_ANALYSIS_RECOVERY_REASONING=high
 OPENAI_ARTICLE_FAST_REASONING=high
 OPENAI_ARTICLE_ESCALATION_REASONING=high
+
 ARTICLEREADY_REVISION_USE_AI=1
+ARTICLEREADY_REVISION_SECOND_HUMANIZER_MODEL_PASS=1
 ARTICLEREADY_ALLOW_REVISION_FALLBACK=0
 
 ARTICLEREADY_SQLITE_DB_PATH=/var/data/articleready_payments.db
@@ -118,7 +129,7 @@ ARTICLEREADY_HSTS_ENABLED=1
 ARTICLEREADY_ENABLE_API_DOCS=0
 ```
 
-The production default is restricted to the verified GPT-5.6 family. Terra handles substantive drafting and revision, Luna handles lower-cost planning and support tasks, and Sol is reserved for exceptional escalation. Set `ARTICLEREADY_ALLOW_NON_GPT56_MODELS=1` only for deliberate compatibility testing.
+Use dated GPT-5.4 or GPT-5.5 snapshots only after confirming that the deployed OpenAI project can access the exact model ID.
 
 ## Validation
 

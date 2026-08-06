@@ -1,3 +1,15 @@
+# Changelog
+
+## 2.3.0 - Hybrid scholarly voice routing
+
+- Routes substantive article drafting, conceptual writing and manuscript revision to GPT-5.5 at high reasoning.
+- Routes the selective final scholarly-naturalness pass to GPT-5.4 at medium reasoning.
+- Retains GPT-5.6 Terra for analysis and recovery, Luna for planning and support, and Sol for exceptional escalation.
+- Accepts approved aliases and dated snapshots from the GPT-5.4, GPT-5.5 and GPT-5.6 families.
+- Builds one author-voice profile from the original manuscript and reuses it across every revision batch.
+- Supplies preceding and following boundary context to batched revisions to reduce abrupt changes in voice and duplicated transitions.
+- Enables the preservation-gated second humanizer pass by default while retaining the original section whenever evidence, citations, numbers or structure are not preserved.
+
 # ArticleReady AI Changelog
 
 ## 2.2.1, incomplete-response and section-truncation recovery

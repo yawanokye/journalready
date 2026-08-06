@@ -1,0 +1,22 @@
+ArticleReady AI 2.3.0 hybrid scholarly voice update
+
+Changed files:
+- app/article_service.py
+- app/article_revision_service.py
+- app/main.py
+- .env.example
+- render.yaml
+- README.md
+- DEPLOYMENT.md
+- CHANGELOG.md
+- HYBRID_SCHOLARLY_VOICE_UPDATE.md
+- HYBRID_SCHOLARLY_VOICE_CHANGED_FILES.txt
+- tests/test_article_workflows.py
+- tests/test_gpt56_revision_pipeline.py
+
+Routing summary:
+- GPT-5.5: substantive article drafting and scholarly revision
+- GPT-5.4: selective preservation-gated naturalness pass
+- GPT-5.6 Terra: xhigh diagnosis, reporting, audit and recovery
+- GPT-5.6 Luna: low-cost planning fallback and reviewer-response support
+- GPT-5.6 Sol: exceptional escalation only
