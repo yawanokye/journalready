@@ -53,6 +53,7 @@ _ACTION_RED = (192, 0, 0)
 LOGGER = logging.getLogger("articleready.openai")
 
 _ALLOWED_GPT56_MODELS = {"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"}
+_DEFAULT_ALLOWED_MODEL_FAMILIES = ("gpt-5.4", "gpt-5.5", "gpt-5.6")
 _REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
 
 _ADAM_2020_REFERENCE = (
@@ -95,15 +96,51 @@ def _safe_get_openai_client(timeout_seconds: float | None = None):
         return None
 
 
-def _normalise_gpt56_model(value: str, fallback: str) -> str:
-    """Return a GPT-5.6 model ID, unless an explicit compatibility override is enabled."""
-    allow_other = _env_bool("ARTICLEREADY_ALLOW_NON_GPT56_MODELS", False)
+def _configured_model_families() -> tuple[str, ...]:
+    raw = str(
+        os.getenv(
+            "ARTICLEREADY_ALLOWED_MODEL_FAMILIES",
+            ",".join(_DEFAULT_ALLOWED_MODEL_FAMILIES),
+        )
+        or ""
+    )
+    families: list[str] = []
+    for item in raw.split(","):
+        family = item.strip().lower()
+        if family and re.fullmatch(r"gpt-\d+(?:\.\d+)*", family) and family not in families:
+            families.append(family)
+    return tuple(families or _DEFAULT_ALLOWED_MODEL_FAMILIES)
+
+
+def _model_family(model: str) -> str:
+    value = str(model or "").strip().lower()
+    for family in sorted(_configured_model_families(), key=len, reverse=True):
+        if value == family or value.startswith(f"{family}-"):
+            return family
+    return ""
+
+
+def _allow_unapproved_models() -> bool:
+    # The legacy switch is retained only so existing deployments do not fail
+    # during migration. New deployments should use the clearer variable.
+    return _env_bool("ARTICLEREADY_ALLOW_UNAPPROVED_MODELS", False) or _env_bool(
+        "ARTICLEREADY_ALLOW_NON_GPT56_MODELS", False
+    )
+
+
+def _normalise_article_model(value: str, fallback: str) -> str:
+    """Return an approved ArticleReady model ID or a safe approved fallback.
+
+    Approved aliases and dated snapshots from the GPT-5.4, GPT-5.5 and GPT-5.6
+    families are accepted. This lets the app preserve a stable scholarly-writing
+    model while retaining GPT-5.6 for analysis, screening and escalation.
+    """
 
     def clean(raw: str) -> str:
         model = str(raw or "").strip()
         if not model or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{1,127}", model):
             return ""
-        if model in _ALLOWED_GPT56_MODELS or allow_other:
+        if _model_family(model) or _allow_unapproved_models():
             return model
         return ""
 
@@ -116,15 +153,25 @@ def _normalise_gpt56_model(value: str, fallback: str) -> str:
     return ""
 
 
-def validate_gpt56_configuration() -> dict[str, str]:
-    """Fail fast when stale non-GPT-5.6 production model values remain configured."""
-    if _env_bool("ARTICLEREADY_ALLOW_NON_GPT56_MODELS", False):
+def _normalise_gpt56_model(value: str, fallback: str) -> str:
+    """Backward-compatible alias for older internal imports and tests."""
+    return _normalise_article_model(value, fallback)
+
+
+def validate_article_model_configuration() -> dict[str, str]:
+    """Fail fast when a configured model is outside the approved families."""
+    if _allow_unapproved_models():
         return {"compatibility_override": "enabled"}
 
     single_value_vars = [
         "OPENAI_ARTICLE_STANDARD_MODEL",
         "OPENAI_ARTICLE_ADVANCED_MODEL",
+        "OPENAI_ARTICLE_WRITING_MODEL",
+        "OPENAI_ARTICLE_CONCEPTUAL_MODEL",
+        "OPENAI_ARTICLE_ANALYSIS_MODEL",
+        "OPENAI_ARTICLE_AUDIT_MODEL",
         "OPENAI_ARTICLE_REVISION_MODEL",
+        "OPENAI_ARTICLE_REVISION_RECOVERY_MODEL",
         "OPENAI_ARTICLE_HUMANIZER_MODEL",
         "OPENAI_ARTICLE_FAST_MODEL",
         "OPENAI_ARTICLE_REVISION_PLAN_MODEL",
@@ -141,7 +188,7 @@ def validate_gpt56_configuration() -> dict[str, str]:
         if not value:
             continue
         configured[name] = value
-        if value not in _ALLOWED_GPT56_MODELS:
+        if not _model_family(value):
             invalid.append(f"{name}={value}")
 
     fallback_values = [
@@ -154,55 +201,62 @@ def validate_gpt56_configuration() -> dict[str, str]:
         invalid.extend(
             f"OPENAI_ARTICLE_FALLBACK_MODELS contains {item}"
             for item in fallback_values
-            if item not in _ALLOWED_GPT56_MODELS
+            if not _model_family(item)
         )
 
     if invalid:
+        allowed = ", ".join(_configured_model_families())
         raise RuntimeError(
-            "ArticleReady is restricted to the GPT-5.6 family. Remove or replace stale model settings: "
-            + "; ".join(invalid)
+            f"ArticleReady only permits the configured model families ({allowed}). "
+            "Remove or replace unapproved model settings: " + "; ".join(invalid)
         )
     return configured
 
 
+def validate_gpt56_configuration() -> dict[str, str]:
+    """Backward-compatible startup alias for the hybrid model validator."""
+    return validate_article_model_configuration()
+
 def _select_article_model(level: str, article_type: str = "", payload: dict[str, Any] | None = None) -> str:
-    """Route substantive ArticleReady drafting to Terra by default for cost control."""
+    """Route scholarly prose to GPT-5.5 while keeping specialised overrides."""
     payload = payload or {}
-    level_l = (level or "").strip().lower()
     type_l = (article_type or "").strip().lower()
-    stage = str(payload.get("draft_stage") or "").strip().lower()
-    target_words = int(payload.get("target_word_count") or 0)
-    long_mode = str(payload.get("long_write_mode") or "auto").strip().lower()
-
-    is_doctoral = any(token in level_l for token in ["phd", "doctor", "dba", "ded", "professional doctorate"])
-    is_research_masters = "research masters" in level_l or "mphil" in level_l
-    is_review_article = any(token in type_l for token in [
+    is_conceptual_or_review = any(token in type_l for token in [
         "systematic", "scoping", "meta-analysis", "meta analysis",
-        "review article", "literature review", "conceptual", "theory", "bibliometric", "scientometric",
+        "review article", "literature review", "conceptual", "theory",
+        "bibliometric", "scientometric", "integrative review",
     ])
-    is_long = target_words > 9000 or long_mode == "batch"
-    is_completion = stage == "continuation_after_results"
 
-    standard_model = _normalise_gpt56_model(
-        os.getenv("OPENAI_ARTICLE_STANDARD_MODEL")
-        or os.getenv("OPENAI_ARTICLE_TERRA_MODEL")
+    writing_model = _normalise_article_model(
+        os.getenv("OPENAI_ARTICLE_WRITING_MODEL")
+        or os.getenv("OPENAI_ARTICLE_ADVANCED_MODEL")
+        or os.getenv("OPENAI_ARTICLE_STANDARD_MODEL")
+        or os.getenv("OPENAI_ARTICLE_RESEARCH_MODEL")
         or os.getenv("OPENAI_ARTICLE_MASTERS_MODEL")
         or os.getenv("OPENAI_ARTICLE_BACHELOR_MODEL")
         or "",
-        "gpt-5.6-terra",
-    )
-    advanced_model = _normalise_gpt56_model(
-        os.getenv("OPENAI_ARTICLE_ADVANCED_MODEL")
-        or os.getenv("OPENAI_ARTICLE_TERRA_MODEL")
-        or os.getenv("OPENAI_ARTICLE_DOCTORAL_MODEL")
-        or os.getenv("OPENAI_ARTICLE_RESEARCH_MODEL")
-        or "",
-        "gpt-5.6-terra",
-    )
+        "gpt-5.5",
+    ) or "gpt-5.5"
+    conceptual_model = _normalise_article_model(
+        os.getenv("OPENAI_ARTICLE_CONCEPTUAL_MODEL") or writing_model,
+        "gpt-5.5",
+    ) or writing_model
+    return conceptual_model if is_conceptual_or_review else writing_model
 
-    if is_doctoral or is_research_masters or is_review_article or is_long or is_completion:
-        return advanced_model or "gpt-5.6-terra"
-    return standard_model or "gpt-5.6-terra"
+
+def _draft_reasoning_effort(payload: dict[str, Any] | None = None) -> str:
+    payload = payload or {}
+    article_type = str(payload.get("article_type") or "").lower()
+    conceptual = any(token in article_type for token in [
+        "systematic", "scoping", "review", "conceptual", "theory",
+        "bibliometric", "scientometric", "meta-analysis", "meta analysis",
+    ])
+    raw = (
+        os.getenv("OPENAI_ARTICLE_CONCEPTUAL_REASONING", "high")
+        if conceptual
+        else os.getenv("OPENAI_ARTICLE_WRITING_REASONING", "high")
+    )
+    return _normalise_reasoning_effort(raw, "high")
 
 
 def _openai_model_candidates(
@@ -211,7 +265,7 @@ def _openai_model_candidates(
     fallback_model: str = "",
     include_configured_fallbacks: bool = True,
 ) -> list[str]:
-    """Return a de-duplicated GPT-5.6 fallback chain."""
+    """Return a de-duplicated hybrid fallback chain."""
     configured = [primary_model, fallback_model, os.getenv("OPENAI_ARTICLE_FALLBACK_MODEL", "")]
     if include_configured_fallbacks:
         configured.extend(
@@ -224,11 +278,10 @@ def _openai_model_candidates(
         )
     candidates: list[str] = []
     for raw_model in configured:
-        model = _normalise_gpt56_model(str(raw_model or ""), "")
+        model = _normalise_article_model(str(raw_model or ""), "")
         if model and model not in candidates:
             candidates.append(model)
-    return candidates or ["gpt-5.6-terra"]
-
+    return candidates or ["gpt-5.5"]
 
 def _provider_status_code(exc: Exception) -> int:
     for attr in ("status_code", "status"):
@@ -268,13 +321,13 @@ def _call_openai_response_with_fallback(
     require_completed: bool = False,
     purpose: str = "article_request",
 ) -> tuple[str, str, list[str]]:
-    """Call the GPT-5.6 Responses API with bounded, cost-aware recovery."""
+    """Call the Responses API with bounded, model-aware recovery."""
     errors: list[str] = []
     last_exc: Exception | None = None
     best_partial: tuple[str, str] | None = None
     attempts_per_effort = max(1, min(int(os.getenv("OPENAI_ARTICLEREADY_ATTEMPTS_PER_MODEL", "1") or 1), 2))
     base_delay = max(0.5, float(os.getenv("OPENAI_ARTICLEREADY_RETRY_BASE_SECONDS", "1.5") or 1.5))
-    primary = _normalise_gpt56_model(primary_model, "gpt-5.6-terra") or "gpt-5.6-terra"
+    primary = _normalise_article_model(primary_model, "gpt-5.5") or "gpt-5.5"
     candidates = _openai_model_candidates(
         primary,
         fallback_model=fallback_model,
@@ -373,7 +426,7 @@ def _call_openai_response_with_fallback(
                     delay = retry_after or min(15.0, base_delay * (2 ** attempt) + random.uniform(0, 0.75))
                     time.sleep(delay)
 
-    # Disabled by default because GPT-5.6 Responses has been verified for this app.
+    # Disabled by default because the Responses API is the production path for all approved models.
     if _env_bool("OPENAI_ARTICLEREADY_CHAT_FALLBACK", False):
         for model in candidates:
             try:
@@ -1269,10 +1322,10 @@ def _apply_strong_article_humanisation(
 
 
 def _humanizer_model() -> str:
-    return _normalise_gpt56_model(
-        os.getenv("OPENAI_ARTICLE_HUMANIZER_MODEL") or os.getenv("OPENAI_ARTICLE_TERRA_MODEL") or "",
-        "gpt-5.6-terra",
-    )
+    return _normalise_article_model(
+        os.getenv("OPENAI_ARTICLE_HUMANIZER_MODEL") or "",
+        "gpt-5.4",
+    ) or "gpt-5.4"
 
 
 def _humanizer_mode(payload: dict[str, Any] | None = None) -> str:
@@ -1295,7 +1348,7 @@ def _humanize_article_with_model(
 ) -> tuple[str, dict[str, Any], list[str]]:
     """Run the same preservation-gated section-batched humaniser used in ThesisReady.
 
-    The deterministic pass always runs when enabled. The optional Terra pass
+    The deterministic pass always runs when enabled. The optional GPT-5.4 scholarly-style pass
     touches only weak sections in balanced mode and all eligible sections in
     deep mode. Failure never invalidates the completed article.
     """
@@ -1373,10 +1426,11 @@ def _humanize_article_with_model(
                 instructions="Perform an evidence-preserving, high-variation scholarly naturalness edit. Return only the revised section.",
                 input_payload=json.dumps(prompt, ensure_ascii=False, indent=2),
                 max_output_tokens=_humanizer_batch_output_tokens(int(batch.get("word_count") or 0)),
-                reasoning_effort=os.getenv("OPENAI_ARTICLE_HUMANIZER_REASONING", "high"),
-                recovery_reasoning_effort="high",
+                reasoning_effort=os.getenv("OPENAI_ARTICLE_HUMANIZER_REASONING", "medium"),
+                recovery_reasoning_effort="medium",
                 fallback_reasoning_effort="high",
                 include_configured_fallbacks=False,
+                require_completed=True,
                 purpose="article_humanizer",
             )
             provider_errors.extend(attempt_notes)
@@ -1698,11 +1752,11 @@ def _draft_article_in_batches(
             raw, used_model, attempt_notes = _call_responses_api(
                 client,
                 model=model,
-                fallback_model=os.getenv("OPENAI_ARTICLE_TERRA_MODEL", "gpt-5.6-terra"),
+                fallback_model=os.getenv("OPENAI_ARTICLE_ANALYSIS_MODEL", "gpt-5.6-terra"),
                 instructions=instructions,
                 prompt=section_prompt,
                 max_output_tokens=_max_output_tokens_for_article(section_words, section_batch=True),
-                reasoning_effort=os.getenv("OPENAI_ARTICLE_ADVANCED_REASONING", "xhigh"),
+                reasoning_effort=_draft_reasoning_effort(payload),
                 recovery_reasoning_effort=os.getenv("OPENAI_ARTICLE_RECOVERY_REASONING", "high"),
                 fallback_reasoning_effort=os.getenv("OPENAI_ARTICLE_ESCALATION_REASONING", "high"),
                 purpose=f"article_batch_section_{index}",
@@ -2812,7 +2866,7 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
                     instructions=instructions,
                     prompt=prompt,
                     max_output_tokens=_max_output_tokens_for_article(int(length_plan.get("target_words") or 7000)),
-                    reasoning_effort=os.getenv("OPENAI_ARTICLE_ADVANCED_REASONING", "xhigh"),
+                    reasoning_effort=_draft_reasoning_effort(payload),
                     recovery_reasoning_effort=os.getenv("OPENAI_ARTICLE_RECOVERY_REASONING", "high"),
                     fallback_reasoning_effort=os.getenv("OPENAI_ARTICLE_ESCALATION_REASONING", "high"),
                     purpose="article_single_pass_draft",
@@ -2890,7 +2944,8 @@ def draft_journal_article(payload: dict[str, Any]) -> dict[str, Any]:
         "humanizer_report": humanizer_report,
         "humanizer_models_used": humanizer_models,
         "quality_filters": [
-            "The strong human-supervised writing layer varies sentence rhythm, paragraph shape and wording without changing confirmed evidence or article structure.",
+            "GPT-5.5 produces the substantive scholarly draft, while GPT-5.4 is reserved for a selective preservation-gated naturalness pass and GPT-5.6 Terra remains the analytical recovery model.",
+        "The strong human-supervised writing layer varies sentence rhythm, paragraph shape and wording without changing confirmed evidence or article structure.",
             "Long-article mode allows user-controlled word targets and section structures, with batch drafting used automatically for long manuscripts unless single-pass mode is selected.",
             "Independent-article mode disables thesis, dissertation and project source fields.",
             "Stage 1 stops the article body at Methods. Stage 2 requires previous sections and completed results or analysis.",

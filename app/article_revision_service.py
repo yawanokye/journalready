@@ -19,7 +19,7 @@ from app.article_service import (
     _humanisation_strength,
     _humanize_article_with_model,
     _humanizer_mode,
-    _normalise_gpt56_model,
+    _normalise_article_model,
     _normalise_reasoning_effort,
     _parse_inline_segments,
     _plain_inline_text,
@@ -29,7 +29,7 @@ from app.article_service import (
     _search_sources,
     _source_context,
 )
-from app.scholarly_humanizer import humanize_scholarly_text
+from app.scholarly_humanizer import analyse_scholarly_style, humanize_scholarly_text
 
 LOGGER = logging.getLogger("articleready.revision")
 
@@ -67,15 +67,35 @@ class RevisionServiceUnavailable(RuntimeError):
 
 
 def _revision_model() -> str:
-    return _normalise_gpt56_model(
+    """Model used for final scholarly rewriting."""
+    return _normalise_article_model(
         os.getenv("OPENAI_ARTICLE_REVISION_MODEL")
+        or os.getenv("OPENAI_ARTICLE_WRITING_MODEL")
         or os.getenv("OPENAI_ARTICLE_ADVANCED_MODEL")
-        or os.getenv("OPENAI_ARTICLE_SOL_MODEL")
-        or os.getenv("OPENAI_ARTICLE_DOCTORAL_MODEL")
         or os.getenv("OPENAI_ARTICLE_RESEARCH_MODEL")
         or "",
+        "gpt-5.5",
+    ) or "gpt-5.5"
+
+
+def _revision_recovery_model() -> str:
+    """Lower-cost analytical recovery model used after a GPT-5.5 failure."""
+    return _normalise_article_model(
+        os.getenv("OPENAI_ARTICLE_REVISION_RECOVERY_MODEL")
+        or os.getenv("OPENAI_ARTICLE_ANALYSIS_MODEL")
+        or os.getenv("OPENAI_ARTICLE_TERRA_MODEL")
+        or "",
         "gpt-5.6-terra",
-    )
+    ) or "gpt-5.6-terra"
+
+
+def _analysis_model() -> str:
+    return _normalise_article_model(
+        os.getenv("OPENAI_ARTICLE_ANALYSIS_MODEL")
+        or os.getenv("OPENAI_ARTICLE_TERRA_MODEL")
+        or "",
+        "gpt-5.6-terra",
+    ) or "gpt-5.6-terra"
 
 
 def _extract_response_text(response: Any) -> str:
@@ -266,7 +286,7 @@ def _revision_timeout_seconds() -> int:
 
 
 def _revision_reasoning() -> str:
-    return _normalise_reasoning_effort(os.getenv("OPENAI_ARTICLE_REVISION_REASONING", "xhigh"), "xhigh")
+    return _normalise_reasoning_effort(os.getenv("OPENAI_ARTICLE_REVISION_REASONING", "high"), "high")
 
 
 def _revision_recovery_reasoning() -> str:
@@ -274,7 +294,7 @@ def _revision_recovery_reasoning() -> str:
 
 
 def _revision_plan_model() -> str:
-    return _normalise_gpt56_model(
+    return _normalise_article_model(
         os.getenv("OPENAI_ARTICLE_REVISION_PLAN_MODEL")
         or os.getenv("OPENAI_ARTICLE_FAST_MODEL")
         or os.getenv("OPENAI_ARTICLE_LUNA_MODEL")
@@ -284,12 +304,46 @@ def _revision_plan_model() -> str:
 
 
 def _revision_escalation_model() -> str:
-    return _normalise_gpt56_model(
+    return _normalise_article_model(
         os.getenv("OPENAI_ARTICLE_ESCALATION_MODEL")
         or os.getenv("OPENAI_ARTICLE_SOL_MODEL")
         or "",
         "gpt-5.6-sol",
     ) or "gpt-5.6-sol"
+
+
+def _build_author_voice_profile(article_text: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Build one global voice profile and reuse it across every revision batch."""
+    report = analyse_scholarly_style(article_text)
+    return {
+        "language": "formal British English",
+        "disciplinary_area": str(payload.get("research_area") or "").strip(),
+        "target_journal": str(payload.get("target_journal") or "").strip(),
+        "original_naturalness_score": report.get("naturalness_score"),
+        "original_sentence_length_cv": report.get("sentence_length_cv"),
+        "original_paragraph_length_cv": report.get("paragraph_length_cv"),
+        "original_lexical_diversity": report.get("lexical_diversity_msttr"),
+        "original_repeated_sentence_openings": report.get("repeated_sentence_openings"),
+        "original_repeated_paragraph_openings": report.get("repeated_paragraph_openings"),
+        "voice_directives": [
+            "Preserve the author's disciplinary register, caution level and field-specific terminology.",
+            "Prefer analytical, evidence-led prose to promotional or formulaic prose.",
+            "Vary sentence and paragraph length only where the argument naturally requires it.",
+            "Do not force every paragraph into the same claim-evidence-conclusion pattern.",
+            "Avoid generic transitions, repeated summary sentences and three-part lists used only for rhythm.",
+            "Keep causal, correlational and interpretive claims at the strength supported by the evidence.",
+        ],
+    }
+
+
+def _context_head(text: str, limit: int = 1200) -> str:
+    value = re.sub(r"\s+", " ", str(text or "")).strip()
+    return value[:limit]
+
+
+def _context_tail(text: str, limit: int = 1200) -> str:
+    value = re.sub(r"\s+", " ", str(text or "")).strip()
+    return value[-limit:]
 
 
 def _section_heading(text: str, fallback: str) -> str:
@@ -611,13 +665,17 @@ def _build_revision_plan(
     try:
         plan, model_used, notes = _call_openai_response_with_fallback(
             client,
-            primary_model=_revision_plan_model(),
-            instructions="Act as a senior journal editor. Produce a concise evidence-grounded revision plan only.",
+            primary_model=_analysis_model(),
+            fallback_model=_revision_plan_model(),
+            instructions=(
+                "Act as a senior journal diagnostician. Identify the exact conceptual, methodological, analytical and publication-readiness corrections required, "
+                "then produce a concise section-specific plan. Do not rewrite the manuscript in this pass."
+            ),
             input_payload=json.dumps(plan_prompt, ensure_ascii=False, indent=2),
             max_output_tokens=_env_int("ARTICLEREADY_REVISION_PLAN_MAX_OUTPUT_TOKENS", 4500, minimum=1200, maximum=8000),
-            reasoning_effort=os.getenv("OPENAI_ARTICLE_FAST_REASONING", "high"),
-            recovery_reasoning_effort="high",
-            fallback_reasoning_effort="high",
+            reasoning_effort=os.getenv("OPENAI_ARTICLE_ANALYSIS_REASONING", "xhigh"),
+            recovery_reasoning_effort=os.getenv("OPENAI_ARTICLE_ANALYSIS_RECOVERY_REASONING", "high"),
+            fallback_reasoning_effort=os.getenv("OPENAI_ARTICLE_FAST_REASONING", "high"),
             request_timeout_seconds=min(_revision_timeout_seconds(), 420),
             include_configured_fallbacks=False,
             require_completed=True,
@@ -631,7 +689,7 @@ def _build_revision_plan(
 
 
 def _section_output_tokens(word_count: int) -> int:
-    """Allow room for both visible revision text and GPT-5.6 reasoning tokens."""
+    """Allow room for visible revision text and reasoning tokens."""
     hard_cap = _env_int(
         "ARTICLEREADY_REVISION_SECTION_MAX_OUTPUT_TOKENS",
         24000,
@@ -715,6 +773,8 @@ def _revise_section_batch(
     batch_number: int,
     total_batches: int,
     source_records: list[dict[str, Any]],
+    preceding_revised_context: str = "",
+    following_original_context: str = "",
     retry_depth: int = 0,
     purpose_suffix: str = "",
 ) -> tuple[str, str, list[str]]:
@@ -739,6 +799,12 @@ def _revise_section_batch(
         "scholarly_source_records": _source_records_for_section(label, source_records),
         "citation_density_requirements": _citation_density_requirements(payload),
         "human_like_writing_layer": _revision_human_writing_layer(payload),
+        "author_voice_profile": article_inputs.get("author_voice_profile") or {},
+        "continuity_context": {
+            "preceding_revised_text_for_flow_only": _context_tail(preceding_revised_context),
+            "following_original_text_for_flow_only": _context_head(following_original_context),
+            "instruction": "Use these boundary excerpts only to maintain continuity. Do not repeat or rewrite them.",
+        },
         "original_section": original,
         "rules": [
             "Revise the supplied section rather than replacing the study with a generic article.",
@@ -748,7 +814,9 @@ def _revise_section_batch(
             "Strengthen conceptual logic, method fit, interpretation, contribution and publication focus only as relevant to this section.",
             "Use source records only where the title or abstract directly supports the claim. Never infer detailed findings from metadata alone.",
             "Preserve existing valid citations and place any verified added citation directly beside the claim it supports.",
+            "Follow the global author_voice_profile so the manuscript reads as one scholarly article rather than separately generated batches.",
             "Use polished formal British English, varied sentence rhythm and natural transitions without artificial errors or commentary about humanisation.",
+            "Do not force generic signposting, repeated paragraph summaries, balanced triples or a uniform paragraph template.",
             "Keep the section close to its original length unless clarity requires modest expansion or compression.",
             "Preserve the exact section heading. When continuation_of_same_section is true, do not repeat the heading.",
             "Finish the section completely. Do not stop mid-sentence, mid-table or inside an author-action marker.",
@@ -763,20 +831,23 @@ def _revise_section_batch(
     try:
         raw, used_model, provider_notes = _call_openai_response_with_fallback(
             client,
-            primary_model=_revision_model(),
-            # Sol is reserved for exceptional escalation after two rounds of
-            # smaller Terra recovery batches. Output truncation is usually a
-            # batching problem, not a reason to pay for Sol on the same large input.
-            fallback_model=_revision_escalation_model() if retry_depth >= 2 else "",
+            primary_model=_revision_model() if retry_depth < 2 else _revision_recovery_model(),
+            # GPT-5.5 writes the scholarly prose. Terra provides analytical
+            # recovery, and Sol is reserved for exceptional smaller-batch escalation.
+            fallback_model=(
+                _revision_recovery_model()
+                if retry_depth < 2
+                else _revision_escalation_model()
+            ),
             instructions=(
-                "You are ArticleReady AI's senior journal revision editor. Produce a rigorous, evidence-preserving revision of only the supplied manuscript section. "
-                "Never invent analysis or results. Return the complete section only."
+                "You are ArticleReady AI's senior scholarly editor. Revise only the supplied manuscript section in the author's established disciplinary voice. "
+                "Preserve evidence and precision, avoid formulaic AI-style prose, never invent analysis or results, and return the complete section only."
             ),
             input_payload=json.dumps(prompt, ensure_ascii=False, indent=2),
             max_output_tokens=_section_output_tokens(int(batch.get("word_count") or _word_count(original))),
             reasoning_effort=_revision_reasoning() if retry_depth == 0 else _revision_recovery_reasoning(),
             recovery_reasoning_effort=_revision_recovery_reasoning(),
-            fallback_reasoning_effort=os.getenv("OPENAI_ARTICLE_ESCALATION_REASONING", "high"),
+            fallback_reasoning_effort=os.getenv("OPENAI_ARTICLE_REVISION_RECOVERY_REASONING", "high") if retry_depth < 2 else os.getenv("OPENAI_ARTICLE_ESCALATION_REASONING", "high"),
             request_timeout_seconds=_revision_timeout_seconds(),
             include_configured_fallbacks=False,
             require_completed=True,
@@ -819,7 +890,9 @@ def _revise_section_batch(
     )
     revised_parts: list[str] = []
     models: list[str] = []
+    child_preceding = preceding_revised_context
     for child_index, child in enumerate(children, start=1):
+        next_child_original = str(children[child_index].get("text") or "") if child_index < len(children) else following_original_context
         child_text, child_model, child_notes = _revise_section_batch(
             client,
             payload=payload,
@@ -829,10 +902,13 @@ def _revise_section_batch(
             batch_number=batch_number,
             total_batches=total_batches,
             source_records=source_records,
+            preceding_revised_context=child_preceding,
+            following_original_context=next_child_original,
             retry_depth=retry_depth + 1,
             purpose_suffix=f"_sub_{child_index}_of_{len(children)}",
         )
         revised_parts.append(child_text.strip())
+        child_preceding = child_text
         notes.extend(child_notes)
         if child_model and child_model not in models:
             models.append(child_model)
@@ -911,11 +987,11 @@ def _generate_revision_report(
     try:
         report, model_used, notes = _call_openai_response_with_fallback(
             client,
-            primary_model=_revision_model(),
+            primary_model=_analysis_model(),
             instructions="Write a precise, evidence-grounded journal revision report. Do not invent completed work.",
             input_payload=json.dumps(report_prompt, ensure_ascii=False, indent=2),
             max_output_tokens=_env_int("ARTICLEREADY_REVISION_REPORT_MAX_OUTPUT_TOKENS", 7000, minimum=2000, maximum=12000),
-            reasoning_effort=os.getenv("OPENAI_ARTICLE_REVISION_REPORT_REASONING", "high"),
+            reasoning_effort=os.getenv("OPENAI_ARTICLE_ANALYSIS_REASONING", os.getenv("OPENAI_ARTICLE_REVISION_REPORT_REASONING", "high")),
             recovery_reasoning_effort="high",
             fallback_reasoning_effort="high",
             request_timeout_seconds=_revision_timeout_seconds(),
@@ -1044,6 +1120,7 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
             "revision_level": str(payload.get("revision_level") or "Publication-readiness overhaul").strip(),
             "additional_revision_goals": str(payload.get("revision_goals") or "").strip(),
             "reviewer_comments": str(payload.get("review_comments") or "").strip(),
+            "author_voice_profile": _build_author_voice_profile(article_text, payload),
             "existing_article": article_text,
         }
         candidate_batches = _split_revision_batches(article_text)
@@ -1071,8 +1148,10 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
             revision_models_used.append(plan_model)
 
         revised_parts: list[str] = []
+        preceding_revised_context = ""
         try:
             for index, batch in enumerate(batches, start=1):
+                following_original_context = str(batches[index].get("text") or "") if index < len(batches) else ""
                 revised_part, used_model, notes = _revise_section_batch(
                     client,
                     payload=payload,
@@ -1082,12 +1161,15 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
                     batch_number=index,
                     total_batches=len(batches),
                     source_records=source_records,
+                    preceding_revised_context=preceding_revised_context,
+                    following_original_context=following_original_context,
                 )
                 provider_errors.extend(notes)
                 if used_model not in {"none", "preserved", "deterministic"} and used_model not in revision_models_used:
                     revision_models_used.append(used_model)
                 original_part = str(batch.get("text") or "").strip()
                 revised_parts.append(revised_part.strip())
+                preceding_revised_context = revised_part
                 batch_audit.append({
                     "batch": index,
                     "section": batch.get("label"),
@@ -1144,7 +1226,7 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
     humanizer_models: list[str] = []
     if mode == "ai_revision":
         use_second_model_pass = str(
-            os.getenv("ARTICLEREADY_REVISION_SECOND_HUMANIZER_MODEL_PASS", "0") or "0"
+            os.getenv("ARTICLEREADY_REVISION_SECOND_HUMANIZER_MODEL_PASS", "1") or "1"
         ).strip().lower() in {"1", "true", "yes", "on"}
         if use_second_model_pass:
             revised_article, humanizer_report, humanizer_models = _humanize_article_with_model(
@@ -1194,9 +1276,10 @@ def revise_article(payload: dict[str, Any]) -> dict[str, Any]:
         "citation_density_report": citation_density,
         "quality_filters": [
             "Long manuscripts are revised section by section to reduce truncation and timeout risk.",
-            "GPT-5.6 Terra performs substantive revision with xhigh reasoning, Terra high provides a lower-cost recovery pass, and Sol is reserved for exceptional escalation.",
-            "GPT-5.6 Luna prepares the compact revision plan and reviewer-response support where enabled.",
-            "The same strong human-supervised academic writing layer used by the Article Writer is applied to article revision.",
+            "GPT-5.5 performs the substantive scholarly rewriting, GPT-5.6 Terra provides analytical recovery and reporting, and GPT-5.6 Sol is reserved for exceptional escalation.",
+            "GPT-5.6 Terra diagnoses the manuscript with xhigh reasoning before rewriting begins; GPT-5.6 Luna remains the lower-cost planning fallback and reviewer-response model.",
+            "A global author-voice profile and section-boundary context keep batched revisions stylistically coherent.",
+            "GPT-5.4 performs a selective preservation-gated final naturalness pass on sections that need it.",
             "The post-processing pass protects confirmed evidence, citations, tables, equations, placeholders and references.",
             "Confirmed results and numerical evidence are preserved unless the author supplies a correction.",
             "Suggested additional analyses are not presented as completed analyses.",
