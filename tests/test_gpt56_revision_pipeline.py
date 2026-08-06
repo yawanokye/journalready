@@ -4,13 +4,16 @@ import json
 from types import SimpleNamespace
 
 
-def test_gpt56_model_guard_rejects_old_family(monkeypatch):
-    from app.article_service import _normalise_gpt56_model
+def test_hybrid_model_guard_accepts_approved_families(monkeypatch):
+    from app.article_service import _normalise_article_model
 
-    monkeypatch.setenv("ARTICLEREADY_ALLOW_NON_GPT56_MODELS", "0")
-    assert _normalise_gpt56_model("gpt-5.1", "gpt-5.6-terra") == "gpt-5.6-terra"
-    assert _normalise_gpt56_model("gpt-5-mini", "") == ""
-    assert _normalise_gpt56_model("gpt-5.6-luna", "gpt-5.6-terra") == "gpt-5.6-luna"
+    monkeypatch.setenv("ARTICLEREADY_ALLOW_UNAPPROVED_MODELS", "0")
+    monkeypatch.setenv("ARTICLEREADY_ALLOWED_MODEL_FAMILIES", "gpt-5.4,gpt-5.5,gpt-5.6")
+    assert _normalise_article_model("gpt-5.1", "gpt-5.6-terra") == "gpt-5.6-terra"
+    assert _normalise_article_model("gpt-5-mini", "") == ""
+    assert _normalise_article_model("gpt-5.4", "gpt-5.6-terra") == "gpt-5.4"
+    assert _normalise_article_model("gpt-5.5-2026-04-23", "gpt-5.6-terra") == "gpt-5.5-2026-04-23"
+    assert _normalise_article_model("gpt-5.6-luna", "gpt-5.6-terra") == "gpt-5.6-luna"
 
 
 def test_responses_request_sends_xhigh_reasoning(monkeypatch):
@@ -63,7 +66,7 @@ def test_long_manuscript_is_split_into_revision_batches(monkeypatch):
     assert all(item["word_count"] > 0 for item in batches)
 
 
-def test_batched_revision_pipeline_uses_terra_and_luna(monkeypatch):
+def test_batched_revision_pipeline_uses_hybrid_routing_and_voice_context(monkeypatch):
     from app import article_revision_service as service
 
     monkeypatch.setenv("ARTICLEREADY_REVISION_BATCH_THRESHOLD_WORDS", "1800")
@@ -95,11 +98,13 @@ def test_batched_revision_pipeline_uses_terra_and_luna(monkeypatch):
         purposes.append((purpose, kwargs.get("primary_model"), kwargs.get("reasoning_effort")))
         data = json.loads(kwargs["input_payload"])
         if purpose == "revision_plan":
-            return "# Revision Plan\n\nStrengthen the contribution and preserve results.", "gpt-5.6-luna", []
+            return "# Revision Plan\n\nStrengthen the contribution and preserve results.", "gpt-5.6-terra", []
         if purpose.startswith("revision_section_"):
             original = data["original_section"]
             revised = original.replace("This section", "This revised section", 1)
-            return revised, "gpt-5.6-terra", []
+            assert data["author_voice_profile"]
+            assert "continuity_context" in data
+            return revised, "gpt-5.5", []
         if purpose == "revision_report":
             return "# Revision and Publishability Report\n\nA substantive revision was completed.", "gpt-5.6-terra", []
         if purpose == "reviewer_response_matrix":
@@ -122,34 +127,57 @@ def test_batched_revision_pipeline_uses_terra_and_luna(monkeypatch):
     assert result["mode"] == "ai_revision"
     assert result["revision_batching_applied"] is True
     assert result["revision_batch_count"] >= 3
-    assert "gpt-5.6-terra" in result["revision_models_used"]
+    assert "gpt-5.5" in result["revision_models_used"]
     assert "gpt-5.6-luna" in result["revision_models_used"]
-    assert result["reasoning_effort"] == "xhigh"
-    assert any(item[0] == "revision_plan" and item[1] == "gpt-5.6-luna" for item in purposes)
-    assert any(item[0].startswith("revision_section_") and item[1] == "gpt-5.6-terra" for item in purposes)
+    assert result["reasoning_effort"] == "high"
+    assert any(item[0] == "revision_plan" and item[1] == "gpt-5.6-terra" and item[2] == "xhigh" for item in purposes)
+    assert any(item[0].startswith("revision_section_") and item[1] == "gpt-5.5" for item in purposes)
 
 
 
-def test_startup_model_validation_fails_on_stale_old_model(monkeypatch):
-    from app.article_service import validate_gpt56_configuration
+def test_startup_model_validation_fails_on_unapproved_old_model(monkeypatch):
+    from app.article_service import validate_article_model_configuration
 
-    monkeypatch.setenv("ARTICLEREADY_ALLOW_NON_GPT56_MODELS", "0")
+    monkeypatch.setenv("ARTICLEREADY_ALLOW_UNAPPROVED_MODELS", "0")
+    monkeypatch.setenv("ARTICLEREADY_ALLOWED_MODEL_FAMILIES", "gpt-5.4,gpt-5.5,gpt-5.6")
     monkeypatch.setenv("OPENAI_ARTICLE_REVISION_MODEL", "gpt-5.1")
     import pytest
-    with pytest.raises(RuntimeError, match="GPT-5.6 family"):
-        validate_gpt56_configuration()
+    with pytest.raises(RuntimeError, match="configured model families"):
+        validate_article_model_configuration()
 
 
-def test_startup_model_validation_accepts_gpt56_routing(monkeypatch):
-    from app.article_service import validate_gpt56_configuration
+def test_startup_model_validation_accepts_hybrid_routing(monkeypatch):
+    from app.article_service import validate_article_model_configuration
 
-    monkeypatch.setenv("ARTICLEREADY_ALLOW_NON_GPT56_MODELS", "0")
-    monkeypatch.setenv("OPENAI_ARTICLE_REVISION_MODEL", "gpt-5.6-terra")
+    monkeypatch.setenv("ARTICLEREADY_ALLOW_UNAPPROVED_MODELS", "0")
+    monkeypatch.setenv("ARTICLEREADY_ALLOWED_MODEL_FAMILIES", "gpt-5.4,gpt-5.5,gpt-5.6")
+    monkeypatch.setenv("OPENAI_ARTICLE_REVISION_MODEL", "gpt-5.5")
+    monkeypatch.setenv("OPENAI_ARTICLE_HUMANIZER_MODEL", "gpt-5.4")
     monkeypatch.setenv("OPENAI_ARTICLE_FAST_MODEL", "gpt-5.6-luna")
     monkeypatch.setenv("OPENAI_ARTICLE_ESCALATION_MODEL", "gpt-5.6-sol")
     monkeypatch.setenv("OPENAI_ARTICLE_FALLBACK_MODELS", "gpt-5.6-terra,gpt-5.6-sol")
-    configured = validate_gpt56_configuration()
-    assert configured["OPENAI_ARTICLE_REVISION_MODEL"] == "gpt-5.6-terra"
+    configured = validate_article_model_configuration()
+    assert configured["OPENAI_ARTICLE_REVISION_MODEL"] == "gpt-5.5"
+    assert configured["OPENAI_ARTICLE_HUMANIZER_MODEL"] == "gpt-5.4"
+
+
+def test_revision_model_roles_follow_hybrid_recommendation(monkeypatch):
+    from app import article_revision_service as service
+    from app.article_service import _humanizer_model
+
+    monkeypatch.setenv("OPENAI_ARTICLE_REVISION_MODEL", "gpt-5.5")
+    monkeypatch.setenv("OPENAI_ARTICLE_HUMANIZER_MODEL", "gpt-5.4")
+    monkeypatch.setenv("OPENAI_ARTICLE_ANALYSIS_MODEL", "gpt-5.6-terra")
+    monkeypatch.setenv("OPENAI_ARTICLE_REVISION_RECOVERY_MODEL", "gpt-5.6-terra")
+    monkeypatch.setenv("OPENAI_ARTICLE_REVISION_PLAN_MODEL", "gpt-5.6-luna")
+    monkeypatch.setenv("OPENAI_ARTICLE_ESCALATION_MODEL", "gpt-5.6-sol")
+
+    assert service._revision_model() == "gpt-5.5"
+    assert _humanizer_model() == "gpt-5.4"
+    assert service._analysis_model() == "gpt-5.6-terra"
+    assert service._revision_recovery_model() == "gpt-5.6-terra"
+    assert service._revision_plan_model() == "gpt-5.6-luna"
+    assert service._revision_escalation_model() == "gpt-5.6-sol"
 
 
 def test_require_completed_retries_after_incomplete_response(monkeypatch):
